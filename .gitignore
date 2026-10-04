@@ -1,0 +1,29 @@
+# Build and test output
+/bin/
+/dist/
+/coverage/
+*.test
+*.test.exe
+/coverage.out
+/coverage.html
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.local.json
+*.local.yaml
+*.local.yml
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# These are shared project inputs, even on hosts that globally ignore agents.
+!/AGENTS.md
+!/.agents/
+!/.agents/**
