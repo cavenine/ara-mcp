@@ -168,7 +168,8 @@ No runtime or hardware validation is claimed.
 - Resolve the control/authoring policy questions needed by T04–T06. Record an
   upstream gap rather than exposing an option whose implementation is missing.
 - Verify packaged template deserialization/execution subset, `get_rig_context` inputs,
-  paged run-state visibility, restart/session invalidation, and emergency-stop results.
+  sequence-list run-state visibility and cursor-pagination behavior, restart/session
+  invalidation, and emergency-stop results.
   Record target/filter metadata and event-catalog gaps, and keep unsupported guarantees
   fail-closed. Maintain O1–O3/O6 with source, test, and simulator evidence.
 
@@ -188,8 +189,8 @@ No runtime dependency is chosen merely because a bundled skill recommends it.
 
 **Work:**
 
-- Add a focused private package for Ara requests with a configured base URL,
-  shared HTTP client, deadlines, context propagation, and bounded response reads.
+- Add a focused private Ara client and Resty-backed HTTP gateway with configured base
+  URL, shared client, deadlines, context propagation, and bounded response reads.
 - Validate configuration and route parameters. Decode Ara's wire format and
   problem responses, preserving useful upstream error context without credentials.
 - Support required pagination and represent synchronous, accepted, and failed

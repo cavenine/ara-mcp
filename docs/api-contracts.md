@@ -50,7 +50,7 @@ reported as physical completion.
 | --- | --- | --- | --- |
 | `get_server_context` | `GET /server/info`, `/server/versions`, `/server/state` | No arguments. Return identity, version/API surface, and state snapshot; keep version and server identity distinct. | Read-only. `/server/versions` is a service implementation; compatibility fields and identity stability need live verification. |
 | `get_rig_context` | `GET /server/state`, `/profile/site`, `/profile/imaging-defaults`, `/profile/filter-wheel/labels`, `/profile/filter-set`, `/equipment/{camera,telescope,focuser,filterwheel}` | No arguments. Return nullable active profile ID, profile/site/imaging/filter defaults and selected device status/capabilities. A disconnected/unselected device route returns 404 and becomes an explicit unavailable status, not a fabricated connected record. | Read-only. The local daemon returned default profile settings with `current_profile_id: null`; device routes returned 404 before simulator connection, then capability/status DTOs after connection. |
-| `list_sequences` | `GET /sequences?limit=&cursor=` | Optional bounded `limit` and opaque `cursor`; return `items`, `next_cursor`, `has_more`. Each item includes `current_run_state` when Ara has retained run state. | Read-only. Paging the library is the available cross-sequence run scan. |
+| `list_sequences` | `GET /sequences?limit=` | Optional limit (client default 50, maximum 100); return `items`, `next_cursor`, `has_more`. Each returned item includes `current_run_state` when Ara has retained run state. | Read-only. On pinned master, `FileSequenceService.ListAsync` applies the limit but ignores `cursor` and always returns `next_cursor: null`, `has_more: false`. There is no sequence-list continuation/global scan; this is an upstream gap, not a client pagination guarantee. |
 | `get_sequence` | `GET /sequences/{id}` | Required sequence UUID; return metadata and opaque JSON `body`; unknown ID is not-found. | Read-only. Preserve `$type` and unknown metadata. |
 | `list_sequence_templates` | `GET /sequences/templates` | No arguments; return names, category, description, built-in flag, and opaque body. | Read-only. The three in-memory built-ins are placeholder bodies; packaged templates are structured sequence trees. `lrgb-dso` deserialized and executed on OmniSim below; other templates and full profile/equipment preflight remain unverified. |
 | `validate_sequence` | `POST /sequences/validate` | Opaque JSON sequence body; return `valid` and optional `reason`. | Read-only. Ara checks object shape, `schemaVersion == "openastroara-sequence-v1"`, and reachable capturable-instruction count only. It does not establish equipment, filter, capability, or finite-loop validity. |
@@ -59,7 +59,7 @@ reported as physical completion.
 | `begin_control` | `POST /server/connect`; bind `/ws` with `X-Ara-Session` | Adapter display name; return adapter-local control ID and sanitized control status. Keep Ara session capability internal. Reclaim with the same session only for recovery within the running adapter. | Control mutation. Another live holder can reject or time out; fresh claims can count as user activity. Do not auto-claim or retry a lost claim response. |
 | `end_control` | `POST /server/disconnect` | Current control ID; release Ara session. Does not stop a run. | Control mutation. A stale session can return not-found; invalidate local control either way. |
 | `start_sequence` | `POST /sequences/{id}/start`, then `GET /sequences/{id}/state` | Sequence UUID, fresh expected run-state check, and intent/control IDs. Ara's required body is `dry_run: false`, `start_from_instruction_index: null`, `continue_on_recoverable_errors: false`; do not present these ignored fields as supported options. | Equipment-changing, asynchronous. Ara returns 202 with `OperationAcceptedDto`; its `operation_id` is not a completion/job key. Track by sequence ID, observed `run_id`/state, and correlated sequence events where actually delivered. |
-| `get_sequence_state` | `GET /sequences/{id}/state` | Sequence UUID; return run ID, state, progress, timestamps, estimated duration, and captured-frame count. States are `idle`, `starting`, `running`, `paused`, `aborting`, `stopped`, `completed`, `failed`, `pausedawaitinguser`. Absent state is not evidence of completion. | Read-only. Run records are in memory and bounded; after Ara restart, saved sequence detail remains but run state is 404/unknown. `GET /server/state.active_sequence_run` is currently an empty placeholder; page `list_sequences` and inspect `current_run_state` instead. |
+| `get_sequence_state` | `GET /sequences/{id}/state` | Sequence UUID; return run ID, state, progress, timestamps, estimated duration, and captured-frame count. States are `idle`, `starting`, `running`, `paused`, `aborting`, `stopped`, `completed`, `failed`, `pausedawaitinguser`. Absent state is not evidence of completion. | Read-only. Run records are in memory and bounded; after Ara restart, saved sequence detail remains but run state is 404/unknown. `GET /server/state.active_sequence_run` is currently an empty placeholder; inspect `current_run_state` for items returned by the limited sequence list. |
 | `pause_sequence`, `resume_sequence`, `stop_sequence`, `abort_sequence` | `POST /sequences/{id}/{pause,resume,stop,abort}` | Sequence UUID, expected run ID, control and intent IDs. Pause/stop/abort have no body; resume's optional Ara body is `recenter`/`refocus` booleans and requires separate support verification. | Equipment-changing, asynchronous. Each currently acknowledges with 202. Observe state/events; stop and abort have distinct events/outcomes, but exact race/failure evidence needs simulator tests. |
 | `emergency_stop` | `POST /server/emergency-stop` | No Ara body; adapter requires local control/intent IDs. Return `already_in_progress`, `runs_aborted`, `exposure_aborted`, `guiding_stopped`, `park_requested`, `flat_panel_light_off`, and `failed_rungs`. | Reserved interrupt, synchronous response. Simulator checks below exercised an active-run abort and mount-park request. The `exposure_aborted` flag currently means the abort command succeeded on a connected camera, not proof an exposure had actually been active. |
 
@@ -116,10 +116,11 @@ create does); all other mutation retries stay disabled after uncertain outcomes.
   unknown where the tool receipt cannot be joined to authoritative state.
 - The adapter's `expected_run_id` is a local stale-call guard, not an Ara atomic
   precondition. The inspected executor reserves by sequence ID; starting a sequence
-  after a terminal run can create another run. `GET /sequences` exposes each
-  sequence's current run state and can be paged for a best-effort global scan, but
-  there is no atomic compare-and-start across sequences or adapters. The one-run rule
-  remains adapter-local and assumes the cooperative single-controller policy.
+  after a terminal run can create another run. `GET /sequences` exposes current run
+  state only for its limited result; the inspected `FileSequenceService` ignores
+  cursor and returns no continuation. There is no global active-run scan or atomic
+  compare-and-start across sequences/adapters. The one-run rule remains adapter-local
+  and assumes the cooperative single-controller policy.
 - Ara's handoff controls a single WS-bound client, not REST authorization. An
   unbound WS connection may trigger attention behavior. Outside valid adapter-owned
   control, use bounded GET polling only; never claim server-enforced exclusion of
@@ -281,9 +282,10 @@ means the abort call succeeded, not proof an exposure was in flight. The
 
 While a wait-only sequence was active, `GET /sequences` returned its
 `current_run_state` as `starting`. The same server snapshot returned
-`active_sequence_run: {}`. Enumerate stored sequences page by page and inspect their
-run states; do not depend on `active_sequence_run` for a current run list or an
-atomic cross-sequence snapshot.
+`active_sequence_run: {}`. The pinned `FileSequenceService.ListAsync` applies the
+requested limit, ignores its cursor argument, and returns `next_cursor: null` and
+`has_more: false`; only returned items can be inspected. Do not assume a complete
+run list or atomic cross-sequence snapshot.
 
 Restarting the disposable daemon changed `server_uuid`, cleared `/server/session`,
 made the old session's disconnect return 404, preserved saved sequence details,
