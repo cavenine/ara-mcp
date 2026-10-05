@@ -5,6 +5,7 @@ package ara
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -418,6 +419,46 @@ func TestListSequencesWithRequestIDPropagatesCorrelation(t *testing.T) {
 	}
 	if got != "tool-request-123" {
 		t.Fatalf("Ara request ID = %q, want tool-request-123", got)
+	}
+}
+
+func TestConnectWithRequestIDClaimsAraControlSession(t *testing.T) {
+	const sessionID = "b15e5138-12f0-4c41-8a43-ed79ef527e12"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/server/connect" {
+			t.Errorf("request = %s %s, want POST /api/v1/server/connect", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Request-ID"); got != "control-request-01" {
+			t.Errorf("request ID = %q, want control-request-01", got)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		if got, want := string(body), `{"hostname":"ara-mcp","session_id":null}`; got != want {
+			t.Errorf("request body = %s, want %s", got, want)
+		}
+		_, _ = io.WriteString(w, `{"session_id":"`+sessionID+`","hostname":"ara-mcp","connected_at":"2026-10-05T00:00:00Z"}`)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connected, result, err := client.ConnectWithRequestID(t.Context(), "ara-mcp", nil, "control-request-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomeCompleted || connected.SessionID() != sessionID || connected.Hostname != "ara-mcp" {
+		t.Fatalf("session claimed=%t hostname=%q outcome=%q, want completed Ara control session", connected.SessionID() == sessionID, connected.Hostname, result.Outcome)
+	}
+	encoded, err := json.Marshal(connected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), sessionID) {
+		t.Fatal("JSON-encoded control session exposed Ara's session capability")
 	}
 }
 

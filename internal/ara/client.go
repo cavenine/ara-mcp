@@ -7,8 +7,11 @@ package ara
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
@@ -76,6 +79,18 @@ type Result struct {
 	RetrySafe bool
 }
 
+// ControlSession contains Ara's session capability. SessionID must remain private
+// to the adapter and must never be returned to an MCP caller or written to logs.
+type ControlSession struct {
+	sessionID   string
+	Hostname    string    `json:"hostname"`
+	ConnectedAt time.Time `json:"connected_at"`
+}
+
+// SessionID returns the Ara capability for session-bound requests. Do not expose
+// it in MCP results, logs, or diagnostics.
+func (s ControlSession) SessionID() string { return s.sessionID }
+
 // New validates configuration and creates the shared Ara client.
 func New(config Config) (*Client, error) {
 	if config.Timeout == 0 {
@@ -107,6 +122,38 @@ func (c *Client) Do(ctx context.Context, request Request, response any) (Result,
 	}
 	exchange, err := c.gateway.do(ctx, request, response)
 	return exchange.result, err
+}
+
+// ConnectWithRequestID claims or reclaims Ara's single-client control slot.
+// Passing a nil sessionID requests a fresh claim; passing the previous capability
+// reclaims that same session after a network interruption.
+func (c *Client) ConnectWithRequestID(ctx context.Context, hostname string, sessionID *string, requestID string) (ControlSession, Result, error) {
+	if strings.TrimSpace(hostname) == "" || (sessionID != nil && *sessionID == "") {
+		return ControlSession{}, Result{Outcome: OutcomeFailed}, errors.New("ara connect: hostname and any prior session ID must be non-empty")
+	}
+	body, err := json.Marshal(struct {
+		Hostname  string  `json:"hostname"`
+		SessionID *string `json:"session_id"`
+	}{Hostname: hostname, SessionID: sessionID})
+	if err != nil {
+		return ControlSession{}, Result{Outcome: OutcomeFailed}, fmt.Errorf("encode Ara connect request: %w", err)
+	}
+	var response struct {
+		SessionID   string    `json:"session_id"`
+		Hostname    string    `json:"hostname"`
+		ConnectedAt time.Time `json:"connected_at"`
+	}
+	result, err := c.Do(ctx, Request{
+		Method: http.MethodPost, Route: "/server/connect", Body: body, RequestID: requestID,
+	}, &response)
+	if err != nil {
+		return ControlSession{}, result, err
+	}
+	if response.SessionID == "" {
+		result.Outcome = OutcomeUnknown
+		return ControlSession{}, result, errors.New("ara connect: response omitted session capability")
+	}
+	return ControlSession{sessionID: response.SessionID, Hostname: response.Hostname, ConnectedAt: response.ConnectedAt}, result, nil
 }
 
 // ListSequences requests the bounded sequence list supported by current Ara.
