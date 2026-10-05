@@ -147,6 +147,7 @@ All paths below start with `/api/v1`:
 | Manual imaging | `POST /equipment/camera/exposure`, `/equipment/camera/exposure/abort`, `/equipment/camera/cooler` |
 | Mount actions | `POST /equipment/telescope/slew`, `/park`, `/unpark`, `/home`, `/abort`, `/tracking` |
 | Focus and filters | `POST /equipment/focuser/move`, `/equipment/focuser/autofocus`, `/equipment/filterwheel/change` |
+| Guider actions | `POST /equipment/guider/start`, `/stop`, `/dither?pixels=` |
 | Centering and solving | `POST /platesolve/center`; `POST /platesolve/frames/{id}/solve` |
 | Background jobs | `GET/DELETE /jobs/{id}` |
 | Server state | `GET /server/info`, `/server/state` |

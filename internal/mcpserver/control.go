@@ -880,7 +880,7 @@ func boundedMutationErrorClass(value string) string {
 		return "none"
 	case "busy", "control_lost", "invalid_receipt", "intent_conflict", "run_state_unknown", "timeout", "cancelled", "network", "decode",
 		"response_too_large", "invalid_argument", "invalid_upstream_request", "not_found", "upstream_conflict", "upstream_unavailable",
-		"invalid_upstream_response", "upstream_error", "uncertain", "run_active", "run_not_active", "stale_run_id", "adapter_error":
+		"invalid_upstream_response", "upstream_error", "uncertain", "run_active", "run_not_active", "stale_run_id", "equipment_unavailable", "unsupported_capability", "adapter_error":
 		return value
 	default:
 		return "other"

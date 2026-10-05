@@ -130,6 +130,7 @@ func New(options Options) (*mcp.Server, error) {
 	})
 	registerSequenceAuthoringTools(server, instrumentation, options.Ara)
 	registerSequenceExecutionTools(server, instrumentation, options.Ara, options.Control)
+	registerManualEquipmentTools(server, instrumentation, options.Ara, options.Control)
 	if options.Control != nil {
 		registerSequenceMutationTools(server, instrumentation, options.Ara, options.Control)
 		addTool(server, instrumentation, &mcp.Tool{
@@ -352,6 +353,12 @@ func toolErrorClass(err error) string {
 	}
 	if errors.Is(err, errInvalidArgument) {
 		return "invalid_argument"
+	}
+	if errors.Is(err, errEquipmentUnavailable) {
+		return "equipment_unavailable"
+	}
+	if errors.Is(err, errUnsupportedEquipment) {
+		return "unsupported_capability"
 	}
 	var apiError *ara.APIError
 	if errors.As(err, &apiError) {

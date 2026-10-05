@@ -41,8 +41,8 @@ captured bodies before freezing schemas.
 
 ## First tool surface
 
-The table is the MCP tool contract; T03–T05 rows are implemented and the later
-execution/manual-action rows remain proposed. Every mutation also requires the selected
+The table is the MCP tool contract; T03–T07 rows are implemented. T08's frame/job
+readers remain planned. Every mutation also requires the selected
 first-release `control_id` and `intent_id` fields, except `end_control`, which
 requires the current control ID. The adapter checks these locally; Ara does not
 enforce this contract for legacy REST mutations. Operation acceptance is never
@@ -64,11 +64,11 @@ reported as physical completion.
 | `start_sequence` | `POST /sequences/{id}/start`, then `GET /sequences/{id}/state` | Sequence UUID plus intent/control IDs. Ara's required body is `dry_run: false`, `start_from_instruction_index: null`, `continue_on_recoverable_errors: false`; do not present these ignored fields as supported options. The adapter refreshes the saved body, Ara structural validation, profile, connected camera/filter wheel, camera exposure/gain/offset/binning limits, referenced wheel positions/profile labels, and bounded active-run list. `ContinueOnError: true` is rejected because this Ara build may emit `instruction_failed` and still report `completed`. | Implemented T06, equipment-changing and asynchronous. Ara returns 202 with `OperationAcceptedDto`; its `operation_id` is not a completion/job key and the route has no verified idempotency support. An unknown start outcome is returned with reconciliation state when available and is not retried. Ara remains the final execution authority. |
 | `get_sequence_state` | `GET /sequences/{id}/state` | Sequence UUID; return Ara's run-state object unchanged, including run ID, state, progress, timestamps, estimated duration, and captured-frame count. States are `idle`, `starting`, `running`, `paused`, `aborting`, `stopped`, `completed`, `failed`, `pausedawaitinguser`. | Implemented T06, read-only. Explicit reads and immediate post-command reads count a distinct terminal sequence/run pair once. Absent state is not evidence of completion. Run records are in memory and bounded; after Ara restart, saved sequence detail remains but run state is 404/unknown. `GET /server/state.active_sequence_run` is currently an empty placeholder; start preflight inspects `current_run_state` for the bounded sequence list and fails closed at the 100-item limit. |
 | `pause_sequence`, `resume_sequence`, `stop_sequence`, `abort_sequence` | `POST /sequences/{id}/{pause,resume,stop,abort}`, then `GET /sequences/{id}/state` | Sequence UUID, expected run ID, control and intent IDs. Pause/stop/abort have no body; resume sends explicit `recenter: false` and `refocus: false` to avoid implicit telescope/focuser actions (the RPi4 Ara build returns 415 without a JSON body). | Implemented T06, equipment-changing and asynchronous. Each must return 202; a different response is treated as unknown. Fresh state and expected-run-ID checks happen under adapter arbitration. Stop/abort use the reserved interrupt lane. Immediate state is only an observation; state-read failure does not erase acceptance. No mutation is automatically retried. Live simulator checks exercised pause→resume→stop and a separate abort. |
-| `emergency_stop` | `POST /server/emergency-stop` | No Ara body; adapter requires local control/intent IDs. Return `already_in_progress`, `runs_aborted`, `exposure_aborted`, `guiding_stopped`, `park_requested`, `flat_panel_light_off`, and `failed_rungs`. | Reserved interrupt, synchronous response. Simulator checks below exercised an active-run abort and mount-park request. The `exposure_aborted` flag currently means the abort command succeeded on a connected camera, not proof an exposure had actually been active. |
+| `emergency_stop` | `POST /server/emergency-stop` | No Ara body; adapter requires local control/intent IDs. Return `already_in_progress`, `runs_aborted`, `exposure_aborted`, `guiding_stopped`, `park_requested`, `flat_panel_light_off`, and `failed_rungs`. | Implemented T07 as a reserved interrupt with Ara's synchronous per-rung result. Existing simulator evidence exercised an active-run abort and mount-park request. The `exposure_aborted` flag currently means the abort command succeeded on a connected camera, not proof an exposure had actually been active. |
 
 ### Initial manual-action tools
 
-These proposed names form the initial T07 tool surface. They use the matching Ara
+These names form the initial implemented T07 tool surface. They use the matching Ara
 DTO fields in lower-snake-case JSON. Exposure is seconds; RA is hours; declination
 and angles are degrees; temperature is Celsius; timestamps are UTC. Device
 connection/profile-selection routes are not exposed as agent tools.
@@ -85,6 +85,24 @@ connection/profile-selection routes are not exposed as agent tools.
 | `move_focuser` | `target_position`; optional `use_temp_comp` (default false). | Ara returns 202 with receipt; observe focuser position/state. |
 | `run_autofocus` | No Ara body. | Ara returns 202 with `BatchJobDto`; track `job_id` via `GET /jobs/{id}`. `DELETE /jobs/{id}` requests cancellation. |
 | `select_filter` | `position` (slot index from filter-wheel status). | Ara returns 202 with receipt; observe current slot. |
+| `start_guiding`, `stop_guiding` | No Ara body. | Ara schedules the PHD2 action and returns 202 with an operation receipt; observe guider status. |
+| `dither_guiding` | Required `pixels` query parameter, finite positive amplitude in pixels. | Ara schedules dither and returns 202 with an operation receipt; observe guider status. |
+
+`abort_telescope_slew` also uses the reserved interrupt lane because Ara's route
+unconditionally pauses active sequences after asking the mount to abort. Exposure
+abort and `emergency_stop` likewise bypass ordinary mutation saturation. Normal
+manual actions preflight connected-device capabilities/status and the bounded sequence
+list; active/paused runs are rejected before dispatch. Immediate device reads after
+acceptance are labeled observations, not causal completion. Ara's frame/job reader
+tools are not in T07; T08 adds them. Ara's pinned master source registers guider
+`/start`, `/stop`, and `/dither` routes, backed by `GuiderService` methods that require
+a connected PHD2 guider and schedule the operation before returning a 202 receipt.
+T07 checks guider connection and the bounded active-run list before dispatch.
+The route and service wiring were verified in Ara commit
+[`6374eede73383851486e6fb498a3311a3be58d82`](https://github.com/open-astro/openastro-ara/tree/6374eede73383851486e6fb498a3311a3be58d82),
+`OpenAstroAra.Server/Endpoints/EquipmentEndpoints.cs` and
+`OpenAstroAra.Server/Services/GuiderService.cs`. These are source/fake-Ara contract
+checks only; T07 has no live guider or physical-rig validation.
 
 The simulator confirmed one supported sequence palette: typed sequential containers,
 bounded `LoopCondition`, `SwitchFilter`, and `TakeExposure`. The packaged

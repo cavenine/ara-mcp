@@ -7,6 +7,13 @@ and dated headings. No release has been published.
 
 ### Added
 
+- T07 manual equipment tools for camera exposures/cooler, telescope slew/park/unpark/
+  abort, focuser move/autofocus, filter selection, PHD2 guiding start/stop/dither,
+  and Ara's emergency-stop ladder.
+  Actions share T04 control/arbitration, refresh run/device/capability state, reserve
+  interrupt capacity for stop actions, and return acceptance separately from frame,
+  job, and immediate device observations. Frame/job monitoring remains unavailable
+  until T08.
 - T06 sequence execution tools: `get_sequence_state`, `start_sequence`,
   `pause_sequence`, `resume_sequence`, `stop_sequence`, and `abort_sequence`.
   Start checks the saved plan, Ara validation, palette, selected profile, connected

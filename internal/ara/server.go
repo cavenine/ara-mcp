@@ -52,6 +52,8 @@ const (
 	DeviceFocuser DeviceType = "focuser"
 	// DeviceFilterWheel selects Ara's filter-wheel status endpoint.
 	DeviceFilterWheel DeviceType = "filterwheel"
+	// DeviceGuider selects Ara's guider status endpoint.
+	DeviceGuider DeviceType = "guider"
 )
 
 // CheckServerWithRequestID checks Ara's server-info endpoint without decoding its body.
@@ -113,7 +115,7 @@ func (c *Client) GetProfileFilterSetWithRequestID(ctx context.Context, requestID
 // GetDeviceStatusWithRequestID reads status for one supported Ara equipment type.
 func (c *Client) GetDeviceStatusWithRequestID(ctx context.Context, device DeviceType, requestID string) (jsontext.Value, Result, error) {
 	switch device {
-	case DeviceCamera, DeviceTelescope, DeviceFocuser, DeviceFilterWheel:
+	case DeviceCamera, DeviceTelescope, DeviceFocuser, DeviceFilterWheel, DeviceGuider:
 	default:
 		return nil, Result{Outcome: OutcomeFailed}, errors.New("ara request: unsupported equipment type")
 	}
