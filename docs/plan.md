@@ -108,7 +108,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | ID | Task | Status | Depends on |
 | --- | --- | --- | --- |
 | T00 | [Repository foundation](#t00-repository-foundation) | Complete | — |
-| T01 | [Ara compatibility and tool contracts](#t01-ara-compatibility-and-tool-contracts) | Pending | T00 |
+| T01 | [Ara compatibility and tool contracts](#t01-ara-compatibility-and-tool-contracts) | Complete for master `6374eede`; first Ara release and host-specific transport checks remain gated to O1/T03/T09 | T00 |
 | T02 | [Ara HTTP client](#t02-ara-http-client) | Pending | T01 |
 | T03 | [Executable, stdio, and read-only tools](#t03-executable-stdio-and-read-only-tools) | Pending | T02 |
 | T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Pending | T03 |
@@ -167,13 +167,16 @@ No runtime or hardware validation is claimed.
 - Capture small, sanitized request/response fixtures from the verified contracts.
 - Resolve the control/authoring policy questions needed by T04–T06. Record an
   upstream gap rather than exposing an option whose implementation is missing.
-- Verify the supported palette/templates, `get_rig_context` inputs, baseline/client
-  matrix, actual global active-run/restart evidence, and interrupt endpoint contracts.
-  Maintain outstanding O1–O3/O6 with executable integration evidence.
+- Verify packaged template deserialization/execution subset, `get_rig_context` inputs,
+  paged run-state visibility, restart/session invalidation, and emergency-stop results.
+  Record target/filter metadata and event-catalog gaps, and keep unsupported guarantees
+  fail-closed. Maintain O1–O3/O6 with source, test, and simulator evidence.
 
-**Deliverables:** versioned compatibility notes, initial tool contract table,
-and fixtures to drive T02 tests. Create a dedicated API/tool reference when these
-contracts are concrete; keep the architecture document as the overview.
+**Deliverables:** current-master compatibility notes, initial tool contract table,
+and sanitized fixtures to drive T02 tests. Source and OmniSim evidence are recorded
+in [api-contracts.md](api-contracts.md); Ara-specific release-tag checks wait for
+Ara's first release, while full route/client tests continue with T03/T04/T07/T09.
+Keep the architecture document as the overview.
 
 **Acceptance:** every planned first tool has an evidenced request/result contract.
 Unused start options, limited validation, and any required Ara changes are named.

@@ -25,6 +25,8 @@ See the [implementation plan](plan.md) for delivery tasks and the
 [development guide](development.md) for setup and verification commands.
 The [observability requirements](observability.md) define how logs, metrics,
 traces, and diagnostics make adapter behavior visible in both transports.
+T01's source-reviewed initial schemas and evidence gaps are tracked in
+[api-contracts.md](api-contracts.md); they are not release compatibility claims.
 Resolved operator/control, operation/recovery, authentication, dashboard, and initial
 resource-limit choices are in [first-release-policy.md](first-release-policy.md).
 
@@ -109,9 +111,13 @@ retention, framework/asset choices, access boundaries, and verification.
 ## Ara operations available to wrap
 
 The following routes were inspected in
-[openastro-ara at commit 34b59e6de](https://github.com/open-astro/openastro-ara/tree/34b59e6de),
-dated 2026-10-03. These notes are source inspection, not live endpoint validation.
-Recheck handlers and service wiring against the Ara version being targeted.
+[openastro-ara at commit 6374eede73383851486e6fb498a3311a3be58d82](https://github.com/open-astro/openastro-ara/tree/6374eede73383851486e6fb498a3311a3be58d82).
+These notes are source inspection, not broad release validation. The checkout
+reports scaffold tier; in-memory built-in templates are placeholders, while
+packaged sequence templates and selected camera/telescope/filter-wheel routes were
+exercised only with simulated devices. See the
+[T01 evidence notes](api-contracts.md#evidence-baseline). Recheck handlers and
+service wiring against the Ara version being targeted.
 
 All paths below start with `/api/v1`:
 

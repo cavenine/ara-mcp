@@ -241,12 +241,12 @@ owners and explicit consequences rather than unspecified design choices.
 
 | ID | Item and required evidence | Owner / consequence |
 | --- | --- | --- |
-| O1 | Tested Ara minimum/released version or build allowlist, API feature gates, SDK protocol and client matrix | T01/T03/T09; unknown baselines cannot enable mutations |
-| O2 | Exact per-tool completion/failure identifiers/events, global active-run enumeration, and emergency-stop capability | T01/T04/T06–T08; receipt-only or missing evidence stays unknown; conflicting normal actions fail closed |
-| O3 | Executable template/palette schema and profile/equipment preflight inputs on the chosen Ara baseline | T01/T05/T06; unsupported plans cannot start |
+| O1 | Ara-specific release tag is not yet published; master `6374eede` is the current tested target. On first Ara release, test newest Ara tag and master independently. SDK v1.8.0 protocol set is selected; no named MCP-host compatibility promise. | T01/T03/T09; unknown builds cannot enable mutations. The repo's inherited N.I.N.A. `v1.10.1` tag is not an Ara release target. |
+| O2 | Receipt IDs do not correlate to run IDs; `sequence.failed` is emitted but missing from WS catalog; `ContinueOnError` can emit `instruction_failed` and still finish `completed`; list paging exposes run state but is not atomic. Active-run emergency stop passed on OmniSim. | T01/T04/T06–T08; use instruction events plus state reconciliation, never infer success from a receipt alone; keep conflicts fail-closed. |
+| O3 | Finite `SequentialContainer`/`LoopCondition`/`SwitchFilter`/`TakeExposure` ran on OmniSim. Packaged LRGB frames were attributed to loop names, lacked filter metadata, and `frames_captured` lagged frame rows; complete metadata/preflight contract remains open. | T01/T05/T06; do not claim reliable target/filter attribution until Ara or adapter semantics are fixed and tested. |
 | O4 | Datastar frontend/Go SDK released version pair, local asset licensing, and actual browser/auth behavior | T12; verify before publishing a working dashboard claim |
 | O5 | SBC measurements, footprint targets, histogram/default-limit adjustments, and cross-platform resource availability | T03/T12/T10; provisional budgets are not hardware support claims |
-| O6 | Actual server identity/resume-epoch changes and interrupted-run/job evidence after restart | T04/T08 integration checks; invalidate control and report unknown until authoritative recovery |
+| O6 | On current master, restart changed server UUID, cleared the session, and removed in-memory run state while preserving the saved sequence. Resume-epoch, interrupted-run and job evidence remain to verify on future release builds. | T04/T08 integration checks; invalidate control and report unknown until authoritative recovery |
 | O7 | Optional read-only Ara WS subscription that does not count as human attention | Upstream enhancement, non-blocking for first release; use REST outside valid owned sessions |
 
 Refer to [the plan](plan.md) and [dashboard contract](resource-dashboard.md) for task

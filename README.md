@@ -108,6 +108,8 @@ above. These are intended targets, not a hardware-validation claim.
 ## Documentation
 
 - [Architecture and Ara API](docs/architecture.md): responsibilities and upstream evidence.
+- [Initial Ara/MCP contracts](docs/api-contracts.md): T01 tool surface, source evidence,
+  and compatibility checks still required before implementation.
 - [Development guide](docs/development.md): setup, checks, and integration testing.
 - [Logging and observability](docs/observability.md): required logs, metrics, traces,
   health diagnostics, and their acceptance criteria.
