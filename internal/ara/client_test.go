@@ -402,6 +402,25 @@ func TestListSequences_UsesBoundedCurrentAraContract(t *testing.T) {
 	}
 }
 
+func TestListSequencesWithRequestIDPropagatesCorrelation(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Request-ID")
+		_, _ = io.WriteString(w, `{"items":[],"next_cursor":null,"has_more":false}`)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := client.ListSequencesWithRequestID(t.Context(), 7, "tool-request-123"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "tool-request-123" {
+		t.Fatalf("Ara request ID = %q, want tool-request-123", got)
+	}
+}
+
 func TestDo_RecordsSanitizedMetricsAndTraceForDecodeFailure(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))

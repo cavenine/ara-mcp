@@ -52,7 +52,8 @@ that library is actually used, not a reason to add the dependency.
 ara-mcp is a Go MCP adapter to OpenAstro Ara, using the official
 `github.com/modelcontextprotocol/go-sdk`. Read [README.md](README.md) for current
 status and [docs/architecture.md](docs/architecture.md) for the call flow and API
-evidence. The Ara HTTP client is in progress; there is no working MCP server yet.
+evidence. T02's Ara HTTP client and T03's stdio server/read-only tools are implemented;
+HTTP transport and mutation tools remain planned.
 
 The call flow is always:
 

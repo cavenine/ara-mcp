@@ -111,6 +111,12 @@ func (c *Client) Do(ctx context.Context, request Request, response any) (Result,
 
 // ListSequences requests the bounded sequence list supported by current Ara.
 func (c *Client) ListSequences(ctx context.Context, limit int) (Page[jsontext.Value], Result, error) {
+	return c.ListSequencesWithRequestID(ctx, limit, "")
+}
+
+// ListSequencesWithRequestID requests the bounded current-Ara sequence list and
+// propagates logical request correlation to the gateway.
+func (c *Client) ListSequencesWithRequestID(ctx context.Context, limit int, requestID string) (Page[jsontext.Value], Result, error) {
 	if limit == 0 {
 		limit = defaultSequenceLimit
 	}
@@ -119,9 +125,10 @@ func (c *Client) ListSequences(ctx context.Context, limit int) (Page[jsontext.Va
 	}
 	var page Page[jsontext.Value]
 	result, err := c.Do(ctx, Request{
-		Method: httpMethodGet,
-		Route:  "/sequences",
-		Query:  map[string][]string{"limit": {fmt.Sprint(limit)}},
+		Method:    httpMethodGet,
+		Route:     "/sequences",
+		Query:     map[string][]string{"limit": {fmt.Sprint(limit)}},
+		RequestID: requestID,
 	}, &page)
 	return page, result, err
 }

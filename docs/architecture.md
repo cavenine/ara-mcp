@@ -13,17 +13,18 @@ persistent service, commonly on the telescope computer. HTTP deployment must
 address authentication, Origin validation, and client ownership before accepting
 network-facing control requests.
 
-Use the official [MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk).
-Use Cobra for application commands and Viper for configuration, with typed,
-validated configuration passed into runtime components. The Ara client uses
-[Resty v2.17.2](https://github.com/go-resty/resty/tree/v2.17.2) behind
+Use the official [MCP Go SDK v1.8.0](https://github.com/modelcontextprotocol/go-sdk)
+for the implemented stdio server and read-only tools; Streamable HTTP is not
+implemented yet. Use Cobra for application commands and Viper for configuration,
+with typed, validated configuration passed into runtime components. The Ara client
+uses [Resty v2.17.2](https://github.com/go-resty/resty/tree/v2.17.2) behind
 `internal/ara/http_gateway.go`. The Ara client exposes the request/outcome contract;
 the gateway owns HTTP execution, status/body decoding, bounded reads, retry policy,
 and request instrumentation.
 Use Go's standard library for JSON and logging where it covers the requirement.
 Use Chi and its middleware for HTTP serving, and Chi render for ordinary HTTP
 payloads as described below. A WebSocket dependency can be selected when event
-integration is implemented. The MCP server and transports are not implemented yet.
+integration is implemented.
 
 See the [implementation plan](plan.md) for delivery tasks and the
 [development guide](development.md) for setup and verification commands.

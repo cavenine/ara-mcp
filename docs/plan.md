@@ -1,7 +1,7 @@
 # ara-mcp implementation plan
 
-**Status:** project setup is complete; runtime implementation has not
-started. This is a proposed delivery plan, not an implemented capability list.
+**Status:** T00–T03 are complete. This plan tracks delivery status and acceptance
+evidence; it is not itself an implemented capability list.
 No release version or date is assigned.
 
 ## Table of contents
@@ -108,9 +108,9 @@ requires implemented deliverables and recorded verification, not merely a design
 | ID | Task | Status | Depends on |
 | --- | --- | --- | --- |
 | T00 | [Repository foundation](#t00-repository-foundation) | Complete | — |
-| T01 | [Ara compatibility and tool contracts](#t01-ara-compatibility-and-tool-contracts) | Complete for master `6374eede`; first Ara release and host-specific transport checks remain gated to O1/T03/T09 | T00 |
-| T02 | [Ara HTTP client](#t02-ara-http-client) | Pending | T01 |
-| T03 | [Executable, stdio, and read-only tools](#t03-executable-stdio-and-read-only-tools) | Pending | T02 |
+| T01 | [Ara compatibility and tool contracts](#t01-ara-compatibility-and-tool-contracts) | Complete for master `6374eede`; first Ara release remains gated by O1; no named MCP host is claimed | T00 |
+| T02 | [Ara HTTP client](#t02-ara-http-client) | Complete — merged in [PR #2](https://github.com/cavenine/ara-mcp/pull/2), commit `14c30de`; `go test -race -shuffle=on -count=1 ./...`, `go vet ./...`, `go build ./...`, `go mod tidy -diff`, `go mod verify`, formatting, and diff checks passed | T01 |
+| T03 | [Executable, stdio, and read-only tools](#t03-executable-stdio-and-read-only-tools) | Complete — process-level stdio smoke, five read-only tools, typed configuration, metrics/traces, and paced process diagnostics; repository checks and five platform cross-builds passed. Completion evidence below. | T02 |
 | T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Pending | T03 |
 | T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | Pending | T03 |
 | T05 | [Sequence authoring](#t05-sequence-authoring) | Pending | T04 |
@@ -235,7 +235,8 @@ Request metrics and trace tests include decoding failures and deadlines.
 - Add read-only `get_rig_context` for the selected profile/site/imaging/filter context
   and connected identities/capabilities. Initially require a rig set up in Ara's UI.
 - Start local diagnostics/sampling with valid configuration even when Ara is offline.
-  Gate mutations on reviewed API/build contracts; exercise unknown/incompatible versions.
+  Keep mutations unregistered until their API/build contracts are reviewed; ensure
+  unknown/incompatible server versions remain inspectable through safe read tools.
 - Add early platform cross-build checks and available native tests when executable/
   OS-specific code lands, rather than first discovering portability problems in T10.
 - Test discovery and calls with the SDK's in-memory transport; add a process-level
@@ -255,8 +256,26 @@ balanced in-flight gauges, and trace operation with export disabled.
 RED/GREEN command tests prove precedence, false/zero values, missing/invalid config,
 test isolation, useful help without an Ara connection, and no usage/banner pollution
 of MCP stdout while serving.
-Tests cover degraded startup/local monitoring, compatibility gating, and the first
-real-Ara simulator integration recipe in addition to mock/SDK-in-memory checks.
+Tests cover degraded startup/local monitoring, unknown-baseline read-only behavior,
+and the first real-Ara simulator integration recipe in addition to mock/SDK-in-memory
+checks. Mutating tools remain absent until their owner tasks complete.
+
+**Completion evidence (2026-10-05):** focused RED/GREEN slices added the MCP server
+(`go test -count=1 ./internal/mcpserver`, initially missing `New`/`Options`, then
+unknown `list_sequences`/diagnostics tools), CLI/config (`go test -count=1 ./internal/app`,
+initially missing `LoadConfig`/`NewCommand`), and sampler (`go test -count=1
+./internal/monitor`, initially missing `NewSampler`). Each focused package passed
+after implementation. Retained coverage includes config precedence/zero values,
+MCP SDK discovery/calls, error sanitization, admission bounds, metrics/traces,
+process CPU warmup/rate/pacing, offline Ara diagnostics, and real-executable stdio
+framing. Final checks passed: `gofmt -l .`, `go mod tidy -diff`, `go mod verify`,
+`go vet ./...`, `go test -race -shuffle=on -count=1 ./...`, `go build ./...`,
+`git diff --check`, and cross-builds for Linux amd64/arm64, Darwin amd64/arm64,
+and Windows amd64. The docs check covered 18 documents, 331 local links/anchors,
+14 task sections with acyclic dependencies, and all 47 bundled skill routes.
+The opt-in live-Ara simulator recipe is documented but was not run through the new
+MCP process; no named host or physical-rig compatibility is claimed. A stripped
+Linux/amd64 local baseline is recorded in [development.md](development.md#small-sbc-validation).
 
 ### T13 Basic diagnostics HTTP foundation
 
