@@ -15,8 +15,9 @@ interface alongside Ara's human-facing client.
 
 **Implementation in progress.** T02's Resty-backed Ara HTTP client, T03's stdio
 MCP server/read tools, T04's begin/end control-phase tools, T05's sequence-authoring
-tools, and T13's optional diagnostics HTTP listener are implemented. Streamable HTTP
-MCP, sequence execution/equipment actions, and a release are not available yet.
+tools, T06's sequence-execution tools, T07's manual camera/mount/focuser/filter-wheel
+actions, and T13's optional diagnostics HTTP listener are implemented. Streamable HTTP
+MCP, job monitoring, image retrieval, and a release are not available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
 context, saved sequence pages/details, sequence templates, validation results, and
@@ -138,11 +139,32 @@ See the [sequence-authoring recipe](docs/sequence-authoring.md) for the pinned
 See [T04](docs/plan.md#t04-ara-control-ownership-and-connection-lifecycle),
 [T05](docs/plan.md#t05-sequence-authoring), and
 [T06](docs/plan.md#t06-sequence-execution) for lifecycle contracts and compatibility
-limits. Manual equipment-action tools are not available yet.
+limits.
+
+## Manual equipment tools
+
+- `capture_exposure`, `abort_exposure`, and `set_camera_cooler` use Ara's camera API.
+- `slew_telescope`, `park_telescope`, `unpark_telescope`, and
+  `abort_telescope_slew` use Ara's telescope API. Telescope abort also pauses active
+  sequences according to Ara's endpoint behavior.
+- `move_focuser` and `run_autofocus` use Ara's focuser API; autofocus returns Ara's
+  actual background job ID. `select_filter` selects an Ara-reported wheel slot.
+- `start_guiding`, `stop_guiding`, and `dither_guiding` use Ara's PHD2 guider API;
+  dither amplitude is in pixels. These return operation acceptance plus guider state,
+  not proof that the guider has started, stopped, or finished dithering.
+- `emergency_stop` returns Ara's synchronous per-rung best-effort result.
+- Normal actions require the active control phase, pass the shared mutation ledger,
+  refresh connected-device capabilities/status, and reject manual actions while an
+  active or paused sequence is reported. Mount abort, exposure abort, and emergency
+  stop use the reserved interrupt lane.
+- Accepted operations remain accepted, not completed. Exposures return Ara's frame
+  ID and autofocus returns its job ID; MCP frame/job readers arrive with T08.
+The T07 routes are source-verified and covered by fake-Ara/MCP contract tests against
+the pinned Ara master commit `6374eede73383851486e6fb498a3311a3be58d82`. They have
+not been exercised against a live daemon or physical equipment.
 
 ## Planned capabilities
 
-- Request manual actions through Ara, such as exposures, slews, and autofocus.
 - Retrieve image previews and operation results.
 - Monitor the application's own CPU/memory/goroutine and related usage on a
   self-hosted, automatically updating SSE dashboard.

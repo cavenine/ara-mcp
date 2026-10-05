@@ -1,6 +1,6 @@
 # ara-mcp implementation plan
 
-**Status:** T00–T03 and T13 are complete. This plan tracks delivery status and acceptance
+**Status:** T00–T07 and T13 are complete. This plan tracks delivery status and acceptance
 evidence; it is not itself an implemented capability list.
 No release version or date is assigned.
 
@@ -115,7 +115,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | Complete — cooperative session tools, arbitration core, reconnect/restart invalidation, lifecycle signals, and local plus Ara-daemon verification are recorded below; O2 global run discovery remains an explicit upstream limit | T03 |
 | T05 | [Sequence authoring](#t05-sequence-authoring) | Complete — authoring tools, adapter palette check, template/create/update round trips, conflict handling, recipe, and pinned LRGB evidence are recorded below | T04 |
 | T06 | [Sequence execution](#t06-sequence-execution) | Complete — live Ara/OmniSim lifecycle and device preflight verified on the RPi4 build; current-master/release compatibility remains under O1 | T05 |
-| T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Pending | T04, T06 |
+| T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Complete — Ara client/tool contracts, capability/run preflight, interrupt lane, fake-Ara/MCP tests, and repository checks passed; no live-device claim | T04, T06 |
 | T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Pending | T06, T07 |
 | T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Pending | T03, T04, T13 |
 | T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Pending | T03, T13 |
@@ -545,6 +545,11 @@ mutation outcomes distinct; a returned tool-call span does not remain open all n
 
 ### T07 Manual equipment tools
 
+**Status:** Complete for the pinned Ara master source contract. Implemented camera,
+telescope, focuser, filter-wheel, guider, and emergency-stop actions through Ara's
+client and T04 dispatcher. Job/frame result readers remain T08; no live daemon or
+physical-device validation is claimed.
+
 **Goal:** expose a focused set of manual actions through Ara, sharing its guards.
 
 **Work:**
@@ -569,6 +574,27 @@ Units, capability errors, and sequence conflicts are visible to the agent; accep
 is never presented as evidence that the mount/exposure/autofocus has finished.
 Tool/upstream diagnostics correlate each action and represent capability/state
 conflicts separately from adapter faults.
+
+**Completion evidence:** `go test -count=1 -run '^TestStartExposureUsesAraContract$'
+./internal/ara` first failed to compile because the Ara exposure request/response
+method was missing, then passed after the route client was added. `go test -count=1
+-run '^TestCaptureExposureUsesAraAndReturnsAcceptance$' ./internal/mcpserver` first
+failed with unknown MCP tool, then passed after registration and verifies accepted
+outcome plus Ara's frame ID. `go test -count=1 -run
+'^TestDitherGuiderUsesAraPixelQuery$' ./internal/ara` first failed to compile due to
+the missing guider client method, then passed with `pixels` on Ara's verified query
+route. Retained focused tests cover all selected Ara POST routes, disabled
+cooler setpoint omission, camera bounds, active-run rejection, disconnected-device
+and unsupported-cooler reporting, guider operation receipts, and emergency-stop rung
+results/replay without redispatch.
+
+Final checks passed: `gofmt -l .`, `go mod tidy -diff`, `go mod verify`,
+`go vet ./...`, `go test -race -shuffle=on -count=1 ./...`, `go build ./...`,
+`git diff --check`, and cross-builds for Linux amd64/arm64, Darwin amd64/arm64,
+and Windows amd64. No live Ara T07 action or physical device was exercised. Ara
+source/behavior compatibility remains bounded to pinned master commit
+`6374eede73383851486e6fb498a3311a3be58d82`; release and physical-rig verification
+remain outstanding under O1/T10.
 
 ### T08 Progress, events, and image previews
 

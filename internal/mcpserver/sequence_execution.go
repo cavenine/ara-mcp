@@ -460,6 +460,8 @@ func sequenceRequirements(body jsontext.Value) (sequenceExecutionRequirements, e
 }
 
 type cameraCapabilities struct {
+	SensorWidth    *int     `json:"sensor_width"`
+	SensorHeight   *int     `json:"sensor_height"`
 	MinExposureSec *float64 `json:"min_exposure_sec"`
 	MaxExposureSec *float64 `json:"max_exposure_sec"`
 	MinGain        *int     `json:"min_gain"`

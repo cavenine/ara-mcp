@@ -25,8 +25,9 @@ This guide owns setup and verification commands for ara-mcp. Read
 
 T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, T04's explicit
 `begin_control`/`end_control` phase tools, T05's sequence-authoring tools, and T13's
-optional diagnostics HTTP listener are implemented. Sequence execution/equipment
-actions, Streamable HTTP MCP, and a release are not available yet.
+optional diagnostics HTTP listener, T06 sequence execution, and T07 manual equipment
+actions are implemented. Job monitoring, Streamable HTTP MCP, and a release are not
+available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -170,6 +171,15 @@ devices and profile/physical filter slots; Ara's own execution guards remain
 authoritative. Starts reject `ContinueOnError` plans. Commands report acceptance
 separately from the immediate state observation. No named MCP host compatibility is
 claimed yet.
+
+T07 adds `capture_exposure`, `abort_exposure`, `set_camera_cooler`,
+`slew_telescope`, `park_telescope`, `unpark_telescope`, `abort_telescope_slew`,
+`move_focuser`, `run_autofocus`, `select_filter`, `start_guiding`, `stop_guiding`,
+`dither_guiding`, and `emergency_stop`. Normal
+actions require T04 control, connected device/capability preflight, and a fresh run
+snapshot; active/paused runs reject manual actions. Ara's accepted response remains
+distinct from frame/job identifiers and immediate device state. T08 will add frame
+and job readers.
 
 The stdio tool set includes `begin_control` and `end_control` in addition to the
 read tools below. Begin requires an active Ara profile and binds the session WebSocket;
