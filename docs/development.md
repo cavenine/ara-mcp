@@ -24,10 +24,10 @@ This guide owns setup and verification commands for ara-mcp. Read
 ## Current state
 
 T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, T04's explicit
-`begin_control`/`end_control` phase tools, T05's sequence-authoring tools, and T13's
-optional diagnostics HTTP listener, T06 sequence execution, and T07 manual equipment
-actions are implemented. Job monitoring, Streamable HTTP MCP, and a release are not
-available yet.
+`begin_control`/`end_control` phase tools, T05's sequence-authoring tools, T06's
+sequence-execution tools, T07 manual equipment actions, T09's authenticated
+Streamable HTTP endpoint, and T13's optional diagnostics HTTP listener are implemented.
+Job monitoring, dashboard/exports, and a release are not available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -104,11 +104,21 @@ Environment variables use the `ARA_MCP` prefix. Supported settings:
 | Log level | `--log-level` | `ARA_MCP_LOG_LEVEL` | `info` |
 | Ara timeout | `--timeout` | `ARA_MCP_TIMEOUT` | `10s` |
 | GET retries | `--read-retries` | `ARA_MCP_READ_RETRIES` | `0` (maximum 2) |
+| HTTP MCP listen address | `--http-listen` | `ARA_MCP_HTTP_LISTEN` | `127.0.0.1:8080` |
+| HTTP MCP bearer token | config file only | `ARA_MCP_HTTP_BEARER_TOKEN` | unset; required for HTTP |
+| Additional trusted HTTP Origins | `--http-origins` | `ARA_MCP_HTTP_ORIGINS` | same-origin only |
+| HTTP MCP TLS certificate/key | `--http-tls-cert` / `--http-tls-key` | `ARA_MCP_HTTP_TLS_CERT` / `ARA_MCP_HTTP_TLS_KEY` | unset; required for non-loopback |
 | Diagnostics listener | `--diagnostics-listen` | `ARA_MCP_DIAGNOSTICS_LISTEN` | disabled |
 | Diagnostics Basic-auth username/password | not exposed as CLI flags | `ARA_MCP_DIAGNOSTICS_USERNAME` / `ARA_MCP_DIAGNOSTICS_PASSWORD` | unset |
 | Diagnostics TLS certificate/key | `--diagnostics-tls-cert` / `--diagnostics-tls-key` | `ARA_MCP_DIAGNOSTICS_TLS_CERT` / `ARA_MCP_DIAGNOSTICS_TLS_KEY` | unset |
 
-HTTP is recognized as a transport setting but remains unavailable until T09.
+HTTP mode serves the SDK Streamable HTTP endpoint at `/mcp`. The bearer token is
+intentionally not exposed as a CLI flag, avoiding process-list disclosure. Use a
+config file or environment variable. Browser cross-origin requests are rejected by
+Go's `CrossOriginProtection` unless the exact Origin is configured in `http-origins`;
+the MCP SDK also retains its localhost Host protection. Non-loopback listeners need
+TLS. A trusted reverse proxy may terminate external TLS and connect to a loopback
+listener. Authenticated HTTP agents share the adapter's single Ara control identity.
 The optional diagnostics listener is independent of the MCP transport and starts
 alongside stdio when configured. Bind it to loopback for local access. Non-loopback
 addresses require Basic-auth credentials and a valid TLS certificate/key pair;
@@ -159,6 +169,25 @@ An agent configuration uses its supported MCP config format. Generic server entr
 }
 ```
 
+### Running and connecting over HTTP
+
+Set a random bearer token of at least 32 characters, then start the persistent
+service:
+
+```sh
+ARA_MCP_TRANSPORT=http \
+ARA_MCP_HTTP_BEARER_TOKEN='replace-with-a-long-random-secret' \
+ARA_MCP_HTTP_LISTEN=127.0.0.1:8080 \
+go run ./cmd/ara-mcp serve
+```
+
+Configure the MCP client for `http://127.0.0.1:8080/mcp` and provide
+`Authorization: Bearer <token>` using the client's supported HTTP-header setting.
+Do not put credentials in URLs or logs. Additional browser client Origins can be
+listed with `ARA_MCP_HTTP_ORIGINS` or `http-origins` in the config file. Remote
+listeners require `ARA_MCP_HTTP_TLS_CERT` and `ARA_MCP_HTTP_TLS_KEY`. Diagnostics
+remain a separate optional listener with independent credentials.
+
 The process writes JSON logs to stderr and MCP frames to stdout only. Available
 tools include `get_server_context`, `get_rig_context`, `list_sequences`,
 `get_sequence`, `get_sequence_state`, `list_sequence_templates`,
@@ -193,8 +222,8 @@ transformations or absence/result models, with Ara wire behavior preserved by te
 ## HTTP routing and middleware
 
 HTTP serving uses **Chi v5**, Chi's middleware, and **go-chi/render**. T13 implements
-the diagnostics router; T09 adds HTTP MCP and T12 adds Datastar/dashboard streams
-and exports.
+the diagnostics router; T09 mounts Streamable HTTP MCP at `/mcp`; T12 adds
+Datastar/dashboard streams and exports.
 The [architecture](architecture.md#http-stack) records the framework/protocol boundary,
 and the [HTTP rules](../.agents/rules/ara-mcp.md#http-routing-and-middleware) own composition.
 

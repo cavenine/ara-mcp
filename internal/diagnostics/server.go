@@ -140,11 +140,21 @@ func Handler(access Access, runtime Runtime) (http.Handler, error) {
 
 // Middleware adds a trusted request ID, structured request logging, and panic recovery.
 func Middleware(logger *slog.Logger) func(http.Handler) http.Handler {
+	return MiddlewareFor(logger, "diagnostics_http")
+}
+
+// MiddlewareFor applies the shared request-ID, structured-log, and panic-recovery stack.
+func MiddlewareFor(logger *slog.Logger, component string) func(http.Handler) http.Handler {
+	return MiddlewareForFaults(logger, component, nil)
+}
+
+// MiddlewareForFaults applies the shared stack and reports recovered panics to onFault.
+func MiddlewareForFaults(logger *slog.Logger, component string, onFault func(*http.Request)) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return func(next http.Handler) http.Handler {
-		return discardRequestID(middleware.RequestID(middleware.RequestLogger(logFormatter{logger: logger})(middleware.Recoverer(next))))
+		return discardRequestID(middleware.RequestID(middleware.RequestLogger(logFormatter{logger: logger, component: component, onFault: onFault})(middleware.Recoverer(next))))
 	}
 }
 
@@ -223,9 +233,15 @@ func discardRequestID(next http.Handler) http.Handler {
 	})
 }
 
-type logFormatter struct{ logger *slog.Logger }
+type logFormatter struct {
+	logger    *slog.Logger
+	component string
+	onFault   func(*http.Request)
+}
 type logEntry struct {
 	logger    *slog.Logger
+	component string
+	onFault   func(*http.Request)
 	request   *http.Request
 	requestID string
 	method    string
@@ -233,7 +249,7 @@ type logEntry struct {
 }
 
 func (f logFormatter) NewLogEntry(r *http.Request) middleware.LogEntry {
-	return &logEntry{logger: f.logger, request: r, requestID: middleware.GetReqID(r.Context()), method: r.Method}
+	return &logEntry{logger: f.logger, component: f.component, onFault: f.onFault, request: r, requestID: middleware.GetReqID(r.Context()), method: r.Method}
 }
 func (e *logEntry) Write(status, bytes int, _ http.Header, elapsed time.Duration, _ any) {
 	route := chi.RouteContext(e.request.Context()).RoutePattern()
@@ -254,8 +270,11 @@ func (e *logEntry) Write(status, bytes int, _ http.Header, elapsed time.Duration
 	if e.failed {
 		level, event, message = slog.LevelError, "http_fault", "http request failed"
 	}
-	e.logger.Log(e.request.Context(), level, message, "service", "ara-mcp", "component", "diagnostics_http", "event", event, "http_request_id", e.requestID, "method", e.method, "route", route, "http_status", status, "response_bytes", bytes, "duration_seconds", elapsed.Seconds())
+	e.logger.Log(e.request.Context(), level, message, "service", "ara-mcp", "component", e.component, "event", event, "http_request_id", e.requestID, "method", e.method, "route", route, "http_status", status, "response_bytes", bytes, "duration_seconds", elapsed.Seconds())
 }
 func (e *logEntry) Panic(_ any, _ []byte) {
 	e.failed = true
+	if e.onFault != nil {
+		e.onFault(e.request)
+	}
 }

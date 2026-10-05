@@ -1,7 +1,7 @@
 # ara-mcp implementation plan
 
-**Status:** T00–T07 and T13 are complete. This plan tracks delivery status and acceptance
-evidence; it is not itself an implemented capability list.
+**Status:** T00–T07, T09, and T13 are complete. This plan tracks delivery status and
+acceptance evidence; it is not itself an implemented capability list.
 No release version or date is assigned.
 
 ## Table of contents
@@ -117,7 +117,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T06 | [Sequence execution](#t06-sequence-execution) | Complete — live Ara/OmniSim lifecycle and device preflight verified on the RPi4 build; current-master/release compatibility remains under O1 | T05 |
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Complete — Ara client/tool contracts, capability/run preflight, interrupt lane, fake-Ara/MCP tests, and repository checks passed; no live-device claim | T04, T06 |
 | T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Pending | T06, T07 |
-| T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Pending | T03, T04, T13 |
+| T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Complete — authenticated SDK transport, committed-header fault accounting, and independent concurrent sessions verified with SDK v1.8.0; no named third-party host or target-board claim | T03, T04, T13 |
 | T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Pending | T03, T13 |
 | T10 | [Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation) | Pending | T05–T09, T12, T13 |
 | T11 | [First release preparation](#t11-first-release-preparation) | Pending | T10 |
@@ -629,6 +629,36 @@ Heartbeat freshness is distinct from ordinary event activity; idle rigs do not
 generate false outage reports or info-level frame/heartbeat noise.
 
 ### T09 Streamable HTTP deployment
+
+**Implementation evidence (2026-10-05):** the app serves the shared MCP server at
+`/mcp` over the official SDK Streamable HTTP handler. Bearer authentication uses
+the SDK auth middleware; same-origin/explicit trusted-Origin checks use Go's
+`CrossOriginProtection`, and SDK localhost Host protection remains on. HTTP uses
+the T13 Chi request-ID/logging/recovery stack with request metrics and spans,
+2 MiB body bounds, cancellation propagation, optional configured TLS, and graceful
+shutdown. `TestHandlerServesSDKProtocolWithBearerAuthAndOriginProtection` uses a real
+SDK HTTP client to initialize, open SSE, list tools, close a session, then verifies
+Origin denial, local request-ID replacement, HTTP request metrics, in-flight balance,
+and spans. `TestHandlerRejectsMissingBearerToken` verifies requests do not reach MCP;
+`TestConfigRequiresAuthenticatedHTTPListener` verifies required bearer access and
+TLS for non-loopback binds. `TestClosingOneHTTPClientLeavesOtherSessionUsable` proves
+closing one of two authenticated SDK sessions leaves the other usable. SDK v1.8.0
+does not expose session accounting/admission; the first-release four-session limit is
+conditional on that SDK support, so no custom counter is added. The SDK v1.8.0 client
+is the supported compatibility baseline; no named third-party host or target-board
+deployment is claimed.
+
+The new RED test initially failed to compile because the handler-composition seam
+did not exist (`undefined: composeHandler`). After extracting that seam and wiring
+recovery fault state into HTTP metrics, `go test -count=1 -run
+'^TestHandlerRecordsCommittedPanicAsTransportFault$' ./internal/httpmcp` passed. The
+full composed-handler/auth/SSE checks passed with
+`go test -count=1 -run 'TestHandler(RecordsCommittedPanicAsTransportFault|ServesSDKProtocolWithBearerAuthAndOriginProtection|RejectsMissingBearerToken)$' ./internal/httpmcp`.
+Final checks passed: `go test -race -shuffle=on -count=1 ./...`,
+`env -u ARA_MCP_LIVE_ARA_URL go test -tags=integration ./...`, `go vet ./...`,
+`go build ./...`, `go mod tidy -diff`, `go mod verify`,
+`go test -count=1 -run '^TestClosingOneHTTPClientLeavesOtherSessionUsable$' ./internal/httpmcp`,
+and `git diff --check`.
 
 **Goal:** serve the same adapter as a persistent MCP endpoint beside Ara.
 

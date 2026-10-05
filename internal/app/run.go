@@ -17,6 +17,7 @@ import (
 
 	"github.com/cavenine/ara-mcp/internal/ara"
 	"github.com/cavenine/ara-mcp/internal/diagnostics"
+	"github.com/cavenine/ara-mcp/internal/httpmcp"
 	"github.com/cavenine/ara-mcp/internal/mcpserver"
 	"github.com/cavenine/ara-mcp/internal/monitor"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -26,9 +27,6 @@ import (
 
 // Serve starts the configured MCP transport. Ara is not contacted until a tool call.
 func Serve(ctx context.Context, config Config, version string, stderr io.Writer) error {
-	if config.Transport != "stdio" {
-		return fmt.Errorf("HTTP MCP transport is not implemented yet")
-	}
 	if stderr == nil {
 		stderr = os.Stderr
 	}
@@ -60,14 +58,35 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("create control manager: %w", err)
 	}
-	server, err := mcpserver.New(mcpserver.Options{
-		Ara: client, Control: control, Version: version, Transport: "stdio", Logger: logger,
+	mcpServer, err := mcpserver.New(mcpserver.Options{
+		Ara: client, Control: control, Version: version, Transport: config.Transport, Logger: logger,
 		Meter:   meterProvider.Meter("github.com/cavenine/ara-mcp/internal/mcpserver"),
 		Tracer:  tracerProvider.Tracer("github.com/cavenine/ara-mcp/internal/mcpserver"),
 		Sampler: sampler, StartedAt: time.Now(),
 	})
 	if err != nil {
 		return fmt.Errorf("create MCP server: %w", err)
+	}
+	var mcpHTTPServer *http.Server
+	var mcpListener net.Listener
+	if config.Transport == "http" {
+		handler, err := httpmcp.Handler(mcpServer, config.HTTPBearerToken, config.HTTPOrigins, logger,
+			meterProvider.Meter("github.com/cavenine/ara-mcp/internal/httpmcp"),
+			tracerProvider.Tracer("github.com/cavenine/ara-mcp/internal/httpmcp"))
+		if err != nil {
+			return fmt.Errorf("configure MCP HTTP: %w", err)
+		}
+		if config.HTTPTLSCert != "" {
+			if _, err := tls.LoadX509KeyPair(config.HTTPTLSCert, config.HTTPTLSKey); err != nil {
+				return fmt.Errorf("load MCP HTTP TLS certificate: %w", err)
+			}
+		}
+		mcpListener, err = net.Listen("tcp", config.HTTPListen)
+		if err != nil {
+			return fmt.Errorf("listen for MCP HTTP: %w", err)
+		}
+		defer mcpListener.Close()
+		mcpHTTPServer = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
 	}
 	var diagnosticsServer *http.Server
 	var diagnosticsListener net.Listener
@@ -91,11 +110,29 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 		}
 		diagnosticsServer = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	}
-	logger.InfoContext(ctx, "adapter started", "service", "ara-mcp", "version", version, "component", "process", "event", "startup", "transport", "stdio")
+	logger.InfoContext(ctx, "adapter started", "service", "ara-mcp", "version", version, "component", "process", "event", "startup", "transport", config.Transport)
+	if mcpListener != nil {
+		logger.InfoContext(ctx, "MCP HTTP listener started", "service", "ara-mcp", "version", version, "component", "mcp_http", "event", "startup", "address", mcpListener.Addr().String())
+	}
 	if diagnosticsListener != nil {
 		logger.InfoContext(ctx, "diagnostics HTTP listener started", "service", "ara-mcp", "version", version, "component", "diagnostics_http", "event", "startup", "address", diagnosticsListener.Addr().String())
 	}
 	runCtx, stop := context.WithCancel(ctx)
+	mcpErrors := make(chan error, 1)
+	if mcpHTTPServer != nil {
+		go func() {
+			var serveErr error
+			if config.HTTPTLSCert != "" {
+				serveErr = mcpHTTPServer.ServeTLS(mcpListener, config.HTTPTLSCert, config.HTTPTLSKey)
+			} else {
+				serveErr = mcpHTTPServer.Serve(mcpListener)
+			}
+			if !errors.Is(serveErr, http.ErrServerClosed) {
+				mcpErrors <- serveErr
+				stop()
+			}
+		}()
+	}
 	if diagnosticsServer != nil {
 		go func() {
 			var serveErr error
@@ -110,11 +147,28 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 			}
 		}()
 	}
-	runErr := server.Run(runCtx, &mcp.StdioTransport{})
+	var runErr error
+	if config.Transport == "stdio" {
+		runErr = mcpServer.Run(runCtx, &mcp.StdioTransport{})
+	} else {
+		<-runCtx.Done()
+	}
 	stop()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	runErr = errors.Join(runErr, control.Close(shutdownCtx, ""))
 	shutdownCancel()
+	if mcpHTTPServer != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := mcpHTTPServer.Shutdown(shutdownCtx); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+		shutdownCancel()
+		select {
+		case err := <-mcpErrors:
+			runErr = errors.Join(runErr, err)
+		default:
+		}
+	}
 	if diagnosticsListener != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := diagnosticsServer.Shutdown(shutdownCtx); err != nil {
@@ -135,7 +189,7 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 	if err := errors.Join(runErr, meterProvider.Shutdown(shutdownCtx), tracerProvider.Shutdown(shutdownCtx)); err != nil {
 		return fmt.Errorf("run MCP server: %w", err)
 	}
-	logger.InfoContext(ctx, "adapter stopped", "service", "ara-mcp", "version", version, "component", "process", "event", "shutdown", "transport", "stdio")
+	logger.InfoContext(ctx, "adapter stopped", "service", "ara-mcp", "version", version, "component", "process", "event", "shutdown", "transport", config.Transport)
 	return nil
 }
 

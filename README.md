@@ -16,8 +16,11 @@ interface alongside Ara's human-facing client.
 **Implementation in progress.** T02's Resty-backed Ara HTTP client, T03's stdio
 MCP server/read tools, T04's begin/end control-phase tools, T05's sequence-authoring
 tools, T06's sequence-execution tools, T07's manual camera/mount/focuser/filter-wheel
-actions, and T13's optional diagnostics HTTP listener are implemented. Streamable HTTP
-MCP, job monitoring, image retrieval, and a release are not available yet.
+actions, T09's authenticated Streamable HTTP MCP endpoint, and T13's optional
+diagnostics HTTP listener are implemented. HTTP protocol and concurrent-session
+behavior are tested with the official MCP Go SDK v1.8.0 client; no third-party host
+compatibility is claimed. Job monitoring, image retrieval, resource dashboard/exports,
+and a release are not available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
 context, saved sequence pages/details, sequence templates, validation results, and
@@ -45,9 +48,9 @@ AlpacaBridge (or another compatible Alpaca device server)
 Astrophotography equipment
 ```
 
-The stdio server uses the official
-[MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk). Planned Streamable
-HTTP will share the same tool handlers and Ara API integration:
+Both transports use the official
+[MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk) and the same tool
+handlers and Ara API integration:
 
 | Mode | MCP transport | Connection to Ara | Lifecycle |
 | --- | --- | --- | --- |
@@ -60,9 +63,15 @@ imaging session when the agent or adapter disconnects.
 The executable uses Cobra and Viper. Configuration precedence is explicit flags >
 `ARA_MCP_*` environment > optional config file > defaults; details and runnable
 commands are in the [development guide](docs/development.md#application-commands-and-configuration).
-HTTP serving will use Chi v5, its middleware, and go-chi/render, with structured
-`slog` request logging and the MCP SDK's handler preserving protocol framing.
+HTTP serving uses Chi v5 and its middleware, with structured `slog` request logging
+and the MCP SDK's handler preserving protocol framing.
 See [HTTP architecture](docs/architecture.md#http-stack).
+
+HTTP mode serves `/mcp` on `127.0.0.1:8080` by default and requires a bearer token
+of at least 32 characters from `ARA_MCP_HTTP_BEARER_TOKEN` or the config file.
+Cross-origin browser requests are denied unless their Origin matches the request
+Host or is listed in `http-origins`. Non-loopback binds require configured TLS.
+See the [HTTP configuration guide](docs/development.md#running-and-connecting-over-http).
 
 The first-release workflow is cooperative: while MCP controls the rig, the user
 does not mutate equipment through Ara's UI. The rig is initially configured and

@@ -5,8 +5,11 @@ sampling; T04 implements control-phase logs, heartbeat/reconnect metrics, bounde
 mutation outcome instrumentation, and diagnostic connection state; T05 adds saved-
 plan change logs with correlation/sequence IDs and no sequence bodies; T13 adds an
 optional Chi diagnostics listener with health/status and Prometheus metrics. T06
-records distinct terminal run-state observations from explicit state reads. Resource
-dashboard/exports and profiling remain planned.
+records distinct terminal run-state observations from explicit state reads. T09 adds
+Streamable HTTP request IDs, structured request logs, request counters/latency/in-flight
+measurements, recovered-fault counting (including after committed headers), request
+spans, and bearer/Origin enforcement on `/mcp`. Resource dashboard/exports and profiling
+remain planned.
 
 These requirements apply to both stdio and Streamable HTTP. They observe the
 adapter and its interaction with Ara; Ara remains authoritative for imaging and
@@ -177,6 +180,11 @@ logs and the bounded in-process replay-deduplication set. Command acceptance rem
 in the T04 mutation outcome metric and is not counted as a terminal result. This
 initial delivery observes on tool reads/immediate post-command reads; it does not
 consume Ara events (T08 owns event observation).
+
+T09's `mcp.http.requests` counter labels normalized transport, route, method, status
+class, and outcome; recovered handler faults use `outcome=error` even if the SDK has
+already committed HTTP 200. `mcp.http.faults` separately counts recovered panics, and
+the corresponding span is marked failed. Panic values are not recorded.
 
 Choose histogram buckets that cover documented request timeouts. Tool-call latency
 measures adapter request handling, not the duration of an exposure or an imaging

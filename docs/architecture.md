@@ -8,14 +8,15 @@ requests. Ara owns equipment coordination, sequence persistence and execution,
 image storage, and imaging-session state. AlpacaBridge supplies hardware drivers.
 
 Both stdio and Streamable HTTP use the same tool handlers and Ara client. Select
-one transport per process. Stdio is for agent-launched local use; HTTP is for a
-persistent service, commonly on the telescope computer. HTTP deployment must
-address authentication, Origin validation, and client ownership before accepting
-network-facing control requests.
+one transport per process. Stdio is for agent-launched local use; HTTP serves the
+SDK endpoint at `/mcp` for a persistent service, commonly on the telescope computer.
+HTTP requires a configured bearer token, applies same-origin/allowed-Origin checks
+and the SDK's localhost Host protection, and gives authenticated clients the same
+shared Ara control identity.
 
 Use the official [MCP Go SDK v1.8.0](https://github.com/modelcontextprotocol/go-sdk)
-for the implemented stdio server, read tools, T04 control phase, and T05 saved-plan
-authoring; Streamable HTTP is not implemented yet. Use Cobra for application commands and Viper for configuration,
+for the stdio and Streamable HTTP transports, read tools, T04 control phase, and T05
+saved-plan authoring. Use Cobra for application commands and Viper for configuration,
 with typed, validated configuration passed into runtime components. The Ara client
 uses [Resty v2.17.2](https://github.com/go-resty/resty/tree/v2.17.2) behind
 `internal/ara/http_gateway.go`. `internal/ara.Client` owns endpoint paths and Ara
@@ -83,6 +84,7 @@ optimizations; add only the caching/pooling/parallelism the measurements justify
 | Resource downloads | Bounded CSV/JSONL snapshots encoded with their native Go encoders |
 | MCP negotiation, JSON-RPC, and JSON/SSE framing | Official MCP Go SDK Streamable HTTP handler, mounted into Chi |
 | Structured request/fault logs | Chi `RequestLogger` formatter hook backed by the shared native `log/slog` logger |
+| MCP HTTP access | SDK bearer-token middleware plus Go `CrossOriginProtection`; SDK localhost Host protection remains enabled |
 
 Both the MCP listener and optional separate diagnostics listener use Chi routers.
 Chi render handles ordinary application payloads; it does not encode SDK MCP
