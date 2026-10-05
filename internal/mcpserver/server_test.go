@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -76,8 +77,8 @@ func TestGetServerContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 5 {
-		t.Fatalf("discovered %d tools, want 5", len(tools.Tools))
+	if len(tools.Tools) != 7 {
+		t.Fatalf("discovered %d tools, want 7", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
@@ -239,6 +240,130 @@ func TestReadOnlySequenceTools(t *testing.T) {
 	}
 	if !json.Valid(gotDetail) || !bytes.Contains(gotDetail, []byte(`"$type":"CustomStep"`)) || !bytes.Contains(gotDetail, []byte(`"unknown":{"keep":1.25}`)) {
 		t.Fatalf("get_sequence did not preserve opaque body: %s", gotDetail)
+	}
+}
+
+func TestValidateSequencePreservesOpaqueBody(t *testing.T) {
+	body := `{"schemaVersion":"openastroara-sequence-v1","$type":"CustomStep","unknown":{"keep":1.25}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sequences/validate" {
+			t.Errorf("request = %s %s, want POST /api/v1/sequences/validate", r.Method, r.URL.Path)
+		}
+		var got struct {
+			Body json.RawMessage `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode validation request: %v", err)
+		}
+		var gotTree, wantTree any
+		if err := json.Unmarshal(got.Body, &gotTree); err != nil {
+			t.Errorf("decode forwarded validation body: %v", err)
+		}
+		if err := json.Unmarshal([]byte(body), &wantTree); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(gotTree, wantTree) {
+			t.Errorf("validation body = %s, want same opaque tree as %s", got.Body, body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"valid":false,"reason":"unsupported instruction"}`))
+	}))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	server, err := New(Options{Ara: client, Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	clientSession, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).
+		Connect(t.Context(), clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{
+		Name:      "validate_sequence",
+		Arguments: json.RawMessage(`{"body":` + body + `}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		var detail string
+		if len(result.Content) > 0 {
+			if text, ok := result.Content[0].(*mcp.TextContent); ok {
+				detail = text.Text
+			}
+		}
+		t.Fatalf("validate_sequence result = %#v, detail = %q, error = %v", result, detail, err)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var validation struct {
+		Valid  bool   `json:"valid"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(encoded, &validation); err != nil {
+		t.Fatal(err)
+	}
+	if validation.Valid || validation.Reason != "unsupported instruction" {
+		t.Fatalf("validation result = %s, want invalid with Ara's reason", encoded)
+	}
+}
+
+func TestListSequenceTemplatesPreservesOpaqueBodies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sequences/templates" {
+			t.Errorf("request = %s %s, want GET /api/v1/sequences/templates", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"name":"lrgb-dso","category":"single-target","description":"LRGB","is_built_in":false,"body":{"schemaVersion":"openastroara-sequence-v1","$type":"SequentialContainer","unknown":{"keep":1.25}}}]`))
+	}))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	server, err := New(Options{Ara: client, Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	clientSession, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).
+		Connect(t.Context(), clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "list_sequence_templates"})
+	if err != nil || result.IsError {
+		t.Fatalf("list_sequence_templates result = %#v, error = %v", result, err)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"name":"lrgb-dso"`)) ||
+		!bytes.Contains(encoded, []byte(`"$type":"SequentialContainer"`)) ||
+		!bytes.Contains(encoded, []byte(`"unknown":{"keep":1.25}`)) {
+		t.Fatalf("template metadata/body not preserved: %s", encoded)
 	}
 }
 

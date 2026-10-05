@@ -2,7 +2,8 @@
 
 **Status:** T02/T03 implement structured Ara/MCP instrumentation and local process
 sampling; T04 implements control-phase logs, heartbeat/reconnect metrics, bounded
-mutation outcome instrumentation, and diagnostic connection state; T13 adds an
+mutation outcome instrumentation, and diagnostic connection state; T05 adds saved-
+plan change logs with correlation/sequence IDs and no sequence bodies; T13 adds an
 optional Chi diagnostics listener with health/status and Prometheus metrics. Resource
 dashboard/exports and profiling remain planned.
 

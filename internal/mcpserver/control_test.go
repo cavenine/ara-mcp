@@ -1003,7 +1003,7 @@ func newMutationTestControl(t *testing.T) *ControlManager {
 	control.controlID = "control-01"
 	control.identity = controlIdentity{
 		serverUUID: "server-01", serverVersion: "1.0.0", apiVersion: "v1",
-		daemonVersion: "1.0.0", daemonGitSHA: "build-01", apiSurfaces: []APISurface{{Name: "rest", Version: "1.0.0"}},
+		daemonVersion: "1.0.0", daemonGitSHA: "build-01", apiSurfaces: []ara.APISurface{{Name: "rest", Version: "1.0.0"}},
 		profileID: "profile-01", resumeToken: "0",
 	}
 	control.session = ara.ControlSession{Hostname: "mutation-test"}

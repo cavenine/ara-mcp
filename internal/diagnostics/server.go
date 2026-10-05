@@ -190,7 +190,7 @@ func (h *healthCache) check(ctx context.Context, client *ara.Client, requestID s
 		h.mu.Unlock()
 
 		checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		_, err := client.Do(checkCtx, ara.Request{Method: http.MethodGet, Route: "/server/info", RequestID: requestID}, nil)
+		_, err := client.CheckServerWithRequestID(checkCtx, requestID)
 		cancel()
 		h.mu.Lock()
 		if ctx.Err() == nil {

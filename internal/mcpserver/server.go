@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -123,7 +124,9 @@ func New(options Options) (*mcp.Server, error) {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (AdapterDiagnostics, error) {
 		return getAdapterDiagnostics(ctx, options, health)
 	})
+	registerSequenceAuthoringTools(server, instrumentation, options.Ara)
 	if options.Control != nil {
+		registerSequenceMutationTools(server, instrumentation, options.Ara, options.Control)
 		addTool(server, instrumentation, &mcp.Tool{
 			Name:        "begin_control",
 			Description: "Begin this adapter's control phase for a configured Ara rig.",
@@ -274,9 +277,15 @@ func addTool[In, Out any](server *mcp.Server, instrumentation toolInstrumentatio
 			if mutationErr, ok := errors.AsType[*MutationDispatchError](callErr); ok {
 				fields = append(fields, "mutation_outcome", mutationErr.Receipt.Outcome,
 					"retry_safe", mutationErr.Receipt.RetrySafe, "intent_replayed", mutationErr.Receipt.Replayed)
+				if mutationErr.Receipt.SequenceID != "" {
+					fields = append(fields, "sequence_id", mutationErr.Receipt.SequenceID)
+				}
 			} else if replayErr, ok := errors.AsType[*MutationReplayError](callErr); ok {
 				fields = append(fields, "mutation_outcome", replayErr.Receipt.Outcome,
 					"retry_safe", replayErr.Receipt.RetrySafe, "intent_replayed", true)
+				if replayErr.Receipt.SequenceID != "" {
+					fields = append(fields, "sequence_id", replayErr.Receipt.SequenceID)
+				}
 			}
 		}
 		instrumentation.logger.Log(ctx, level, "tool call completed", fields...)
@@ -371,32 +380,9 @@ func requestID(ctx context.Context) string {
 
 // ServerContext contains one point-in-time set of server identity and state reads.
 type ServerContext struct {
-	Server   ServerInfo     `json:"server"`
-	Versions ServerVersions `json:"versions"`
-	State    map[string]any `json:"state"`
-}
-
-// ServerInfo is Ara's /server/info response.
-type ServerInfo struct {
-	UUID     string `json:"server_uuid"`
-	Nickname string `json:"nickname"`
-	Version  string `json:"version"`
-	API      string `json:"api"`
-	Tier     string `json:"tier"`
-}
-
-// ServerVersions describes Ara's REST and WebSocket surfaces.
-type ServerVersions struct {
-	DaemonVersion string       `json:"daemon_version"`
-	DaemonGitSHA  string       `json:"daemon_git_sha"`
-	DotnetVersion string       `json:"dotnet_version"`
-	APISurfaces   []APISurface `json:"api_surfaces"`
-}
-
-// APISurface is one versioned Ara API surface.
-type APISurface struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Server   ara.ServerInfo     `json:"server"`
+	Versions ara.ServerVersions `json:"versions"`
+	State    map[string]any     `json:"state"`
 }
 
 // RigContext is a point-in-time view of Ara's configured profile and devices.
@@ -475,7 +461,7 @@ func (h *araHealth) check(ctx context.Context, client *ara.Client, requestID str
 		wait := h.wait
 		h.mu.Unlock()
 
-		_, err := client.Do(ctx, ara.Request{Method: http.MethodGet, Route: "/server/info", RequestID: requestID}, nil)
+		_, err := client.CheckServerWithRequestID(ctx, requestID)
 		h.mu.Lock()
 		if ctx.Err() != nil {
 			h.checking = false
@@ -505,29 +491,35 @@ func (h *araHealth) snapshotLocked() (bool, *time.Time) {
 }
 
 func getServerContext(ctx context.Context, client *ara.Client) (ServerContext, error) {
-	var result ServerContext
-	requests := []struct {
-		route string
-		out   any
-	}{
-		{route: "/server/info", out: &result.Server},
-		{route: "/server/versions", out: &result.Versions},
-		{route: "/server/state", out: &result.State},
+	server, _, err := client.GetServerInfoWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return ServerContext{}, fmt.Errorf("read Ara server info: %w", err)
 	}
-	for _, request := range requests {
-		if _, err := client.Do(ctx, ara.Request{Method: http.MethodGet, Route: request.route, RequestID: requestID(ctx)}, request.out); err != nil {
-			return ServerContext{}, fmt.Errorf("read Ara %s: %w", request.route, err)
-		}
+	versions, _, err := client.GetServerVersionsWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return ServerContext{}, fmt.Errorf("read Ara server versions: %w", err)
 	}
-	return result, nil
+	state, _, err := client.GetServerStateWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return ServerContext{}, fmt.Errorf("read Ara server state: %w", err)
+	}
+	var decodedState map[string]any
+	if err := json.Unmarshal(state, &decodedState); err != nil {
+		return ServerContext{}, fmt.Errorf("decode Ara server state: %w", err)
+	}
+	return ServerContext{Server: server, Versions: versions, State: decodedState}, nil
 }
 
 func getRigContext(ctx context.Context, client *ara.Client) (RigContext, error) {
+	stateBody, _, err := client.GetServerStateWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return RigContext{}, fmt.Errorf("read Ara server state: %w", err)
+	}
 	var state struct {
 		CurrentProfileID *string `json:"current_profile_id"`
 	}
-	if _, err := client.Do(ctx, ara.Request{Method: http.MethodGet, Route: "/server/state", RequestID: requestID(ctx)}, &state); err != nil {
-		return RigContext{}, fmt.Errorf("read Ara /server/state: %w", err)
+	if err := json.Unmarshal(stateBody, &state); err != nil {
+		return RigContext{}, fmt.Errorf("decode Ara server state: %w", err)
 	}
 	result := RigContext{
 		CurrentProfileID: state.CurrentProfileID,
@@ -536,22 +528,37 @@ func getRigContext(ctx context.Context, client *ara.Client) (RigContext, error) 
 			"focuser": {Reason: "unavailable"}, "filterwheel": {Reason: "unavailable"},
 		},
 	}
-	for _, request := range []struct {
-		route string
-		out   any
-	}{
-		{route: "/profile/site", out: &result.Site},
-		{route: "/profile/imaging-defaults", out: &result.ImagingDefaults},
-		{route: "/profile/filter-wheel/labels", out: &result.FilterWheelLabels},
-		{route: "/profile/filter-set", out: &result.FilterSet},
-	} {
-		if _, err := client.Do(ctx, ara.Request{Method: http.MethodGet, Route: request.route, RequestID: requestID(ctx)}, request.out); err != nil {
-			return RigContext{}, fmt.Errorf("read Ara %s: %w", request.route, err)
-		}
+	site, _, err := client.GetProfileSiteWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return RigContext{}, fmt.Errorf("read Ara profile site: %w", err)
 	}
-	for _, device := range []string{"camera", "telescope", "focuser", "filterwheel"} {
+	if err := json.Unmarshal(site, &result.Site); err != nil {
+		return RigContext{}, fmt.Errorf("decode Ara profile site: %w", err)
+	}
+	defaults, _, err := client.GetProfileImagingDefaultsWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return RigContext{}, fmt.Errorf("read Ara imaging defaults: %w", err)
+	}
+	if err := json.Unmarshal(defaults, &result.ImagingDefaults); err != nil {
+		return RigContext{}, fmt.Errorf("decode Ara imaging defaults: %w", err)
+	}
+	labels, _, err := client.GetProfileFilterWheelLabelsWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return RigContext{}, fmt.Errorf("read Ara filter wheel labels: %w", err)
+	}
+	if err := json.Unmarshal(labels, &result.FilterWheelLabels); err != nil {
+		return RigContext{}, fmt.Errorf("decode Ara filter wheel labels: %w", err)
+	}
+	filterSet, _, err := client.GetProfileFilterSetWithRequestID(ctx, requestID(ctx))
+	if err != nil {
+		return RigContext{}, fmt.Errorf("read Ara filter set: %w", err)
+	}
+	if err := json.Unmarshal(filterSet, &result.FilterSet); err != nil {
+		return RigContext{}, fmt.Errorf("decode Ara filter set: %w", err)
+	}
+	for _, device := range []ara.DeviceType{ara.DeviceCamera, ara.DeviceTelescope, ara.DeviceFocuser, ara.DeviceFilterWheel} {
 		var status map[string]any
-		_, err := client.Do(ctx, ara.Request{Method: http.MethodGet, Route: "/equipment/" + device, RequestID: requestID(ctx)}, &status)
+		statusBody, _, err := client.GetDeviceStatusWithRequestID(ctx, device, requestID(ctx))
 		if err != nil {
 			var apiError *ara.APIError
 			if errors.As(err, &apiError) && apiError.Status == http.StatusNotFound {
@@ -559,7 +566,10 @@ func getRigContext(ctx context.Context, client *ara.Client) (RigContext, error) 
 			}
 			return RigContext{}, fmt.Errorf("read Ara equipment %s: %w", device, err)
 		}
-		result.Devices[device] = DeviceSnapshot{Available: true, Status: status}
+		if err := json.Unmarshal(statusBody, &status); err != nil {
+			return RigContext{}, fmt.Errorf("decode Ara equipment %s status: %w", device, err)
+		}
+		result.Devices[string(device)] = DeviceSnapshot{Available: true, Status: status}
 	}
 	return result, nil
 }
@@ -579,13 +589,8 @@ func listSequences(ctx context.Context, client *ara.Client, limit int) (ara.Page
 }
 
 func getSequence(ctx context.Context, client *ara.Client, id string) (jsontext.Value, error) {
-	var result jsontext.Value
-	if _, err := client.Do(ctx, ara.Request{
-		Method:     http.MethodGet,
-		Route:      "/sequences/{id}",
-		PathParams: map[string]string{"id": id},
-		RequestID:  requestID(ctx),
-	}, &result); err != nil {
+	result, _, err := client.GetSequenceWithRequestID(ctx, id, requestID(ctx))
+	if err != nil {
 		return nil, fmt.Errorf("read Ara sequence: %w", err)
 	}
 	return result, nil

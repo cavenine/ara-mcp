@@ -23,10 +23,10 @@ This guide owns setup and verification commands for ara-mcp. Read
 
 ## Current state
 
-T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, and T13's
-optional diagnostics HTTP listener are implemented, along with T04's explicit
-`begin_control`/`end_control` phase tools. These tools manage Ara's adapter session
-only; sequence/equipment mutations, HTTP MCP, and a release are not available yet.
+T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, T04's explicit
+`begin_control`/`end_control` phase tools, T05's sequence-authoring tools, and T13's
+optional diagnostics HTTP listener are implemented. Sequence execution/equipment
+actions, Streamable HTTP MCP, and a release are not available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -159,8 +159,13 @@ An agent configuration uses its supported MCP config format. Generic server entr
 ```
 
 The process writes JSON logs to stderr and MCP frames to stdout only. Available
-tools are `get_server_context`, `get_rig_context`, `list_sequences`, `get_sequence`,
-and `get_adapter_diagnostics`. No named MCP host compatibility is claimed yet.
+tools include `get_server_context`, `get_rig_context`, `list_sequences`,
+`get_sequence`, `list_sequence_templates`, `validate_sequence`, and
+`get_adapter_diagnostics`. With T04 control configured, it also exposes
+`begin_control`, `end_control`, `create_sequence`, `update_sequence`, and
+`instantiate_sequence_template`. Validation is structural/palette checking, not
+rig/equipment preflight. See the [authoring recipe](sequence-authoring.md). No named
+MCP host compatibility is claimed yet.
 
 The stdio tool set includes `begin_control` and `end_control` in addition to the
 read tools below. Begin requires an active Ara profile and binds the session WebSocket;
