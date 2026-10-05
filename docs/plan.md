@@ -113,7 +113,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T03 | [Executable, stdio, and read-only tools](#t03-executable-stdio-and-read-only-tools) | Complete — process-level stdio smoke, five read-only tools, typed configuration, metrics/traces, and paced process diagnostics; repository checks and five platform cross-builds passed. Completion evidence below. | T02 |
 | T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Complete — Chi diagnostics listener, access policy, probes/status/metrics, and middleware behavior verified. | T03 |
 | T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | Complete — cooperative session tools, arbitration core, reconnect/restart invalidation, lifecycle signals, and local plus Ara-daemon verification are recorded below; O2 global run discovery remains an explicit upstream limit | T03 |
-| T05 | [Sequence authoring](#t05-sequence-authoring) | Pending | T04 |
+| T05 | [Sequence authoring](#t05-sequence-authoring) | Complete — authoring tools, adapter palette check, template/create/update round trips, conflict handling, recipe, and pinned LRGB evidence are recorded below | T04 |
 | T06 | [Sequence execution](#t06-sequence-execution) | Pending | T05 |
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Pending | T04, T06 |
 | T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Pending | T06, T07 |
@@ -402,6 +402,13 @@ commands were used. Exact tagged test commands are recorded in `development.md`.
 
 ### T05 Sequence authoring
 
+**Status:** Complete (2026-10-05). Added template list/instantiation, structural
+validation, saved-plan create/update, and a pinned executable-palette check. Opaque
+JSON bodies are forwarded without re-marshaling through generic maps. Every saved-plan
+mutation requires T04 control/intent IDs and uses its dispatcher; template
+instantiation is not treated as idempotent. Tool descriptions and the recipe
+separate structural validation from the start-time rig preflight still owned by T06.
+
 **Goal:** let an agent prepare a saved plan without starting equipment actions.
 
 **Work:**
@@ -412,7 +419,7 @@ commands were used. Exact tagged test commands are recorded in `development.md`.
   schema version, identifiers, conditions, triggers, and unknown data on round-trip.
 - Preserve metadata but reject unsupported executable types/parameters against the
   verified palette; only supported bounded recipes/loops can be considered executable.
-  Preflight required slots, filter references/capabilities, and fresh rig context
+  T06 performs fresh rig, required-slot, filter-capability, and equipment preflight
   before start. Ara's limited `/validate` remains an additional structural check.
 - Exercise at least one real executable imaging template/body from the targeted
   Ara version; do not assume every advertised template is executable.
@@ -428,6 +435,40 @@ round-trip tests, and an agent-facing recipe.
 or any equipment endpoint. Active-run update conflicts and invalid bodies return
 useful errors. The recipe works with the ownership policy selected in T04.
 Saved-plan mutation diagnostics contain correlation/sequence IDs, not sequence bodies.
+
+**Completion evidence (2026-10-05):** MCP tool/`httptest` contract tests cover template
+listing with opaque bodies, validation reason handling and palette distinction,
+create with exact raw JSON plus Ara idempotency key and same-intent replay/read-back,
+update PATCH-only fields and Ara active-run conflict, template instantiation without
+an upstream idempotency claim, and rejection of unknown executable types before
+dispatch. RED/GREEN was recorded for the missing template, create, update, and
+instantiation tools and for unsupported-type dispatch. The focused tests are
+`TestListSequenceTemplatesPreservesOpaqueBodies`,
+`TestValidateSequencePreservesOpaqueBody`,
+`TestValidateSequenceDistinguishesStructuralValidityFromUnsupportedPalette`,
+`TestCreateSequenceSavesOpaqueBodyWithIntentKey`,
+`TestCreateSequenceRejectsUnsupportedExecutableTypeBeforeSaving`,
+`TestUpdateSequenceSendsOnlyRequestedPatchFields`,
+`TestUpdateSequenceReportsAraActiveRunConflict`,
+`TestUpdateSequenceRejectsUnsupportedBodyBeforePatch`,
+`TestInstantiateSequenceTemplateSavesWithoutStarting`,
+`TestSupportedSequencePaletteAcceptsBoundedLRGBBlock`, and
+`TestSavedSequenceLogCorrelatesIDWithoutBody`. Fake Ara handlers fail unexpected
+routes, so these tool paths cannot silently start a run or hit equipment endpoints.
+The agent-facing steps and limits are in [`sequence-authoring.md`](sequence-authoring.md).
+
+The verified example is Ara's `lrgb-dso` packaged template at commit
+`6374eede73383851486e6fb498a3311a3be58d82`. Its bounded
+`SequentialContainer`/`LoopCondition`/`SwitchFilter`/`TakeExposure` body ran on the
+pinned Ara development daemon with OmniSim in the T01 check: four reduced one-loop
+filter blocks saved four simulated frames. Ara's target/filter attribution and
+reported frame count disagreed with the frame catalog; authoring does not mask or
+resolve those O3 execution/reporting limits. Exact live observations are in
+[`api-contracts.md`](api-contracts.md#sequence-event-restart-and-emergency-stop-checks-2026-10-0405).
+
+Final checks passed: `gofmt -l .`, `go mod tidy -diff`, `go mod verify`, `go vet ./...`,
+`go test -race -shuffle=on -count=1 ./...`, `go build ./...`, `git diff --check`, and
+cross-builds for Linux amd64/arm64, Darwin amd64/arm64, and Windows amd64.
 
 ### T06 Sequence execution
 

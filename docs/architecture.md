@@ -14,13 +14,14 @@ address authentication, Origin validation, and client ownership before accepting
 network-facing control requests.
 
 Use the official [MCP Go SDK v1.8.0](https://github.com/modelcontextprotocol/go-sdk)
-for the implemented stdio server and read-only tools; Streamable HTTP is not
-implemented yet. Use Cobra for application commands and Viper for configuration,
+for the implemented stdio server, read tools, T04 control phase, and T05 saved-plan
+authoring; Streamable HTTP is not implemented yet. Use Cobra for application commands and Viper for configuration,
 with typed, validated configuration passed into runtime components. The Ara client
 uses [Resty v2.17.2](https://github.com/go-resty/resty/tree/v2.17.2) behind
-`internal/ara/http_gateway.go`. The Ara client exposes the request/outcome contract;
-the gateway owns HTTP execution, status/body decoding, bounded reads, retry policy,
-and request instrumentation.
+`internal/ara/http_gateway.go`. `internal/ara.Client` owns endpoint paths and Ara
+request/response contracts; MCP tools call its operation-specific methods. The
+generic gateway owns HTTP execution, status/body decoding, bounded reads, retry
+policy, and request instrumentation without knowing Ara endpoint semantics.
 Use Go's standard library for JSON and logging where it covers the requirement.
 Use Chi and its middleware for HTTP serving, and Chi render for ordinary HTTP
 payloads as described below. T04 uses `github.com/coder/websocket` v1.8.12 for

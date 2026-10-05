@@ -29,7 +29,7 @@ func TestLiveAraControlSessionAndHeartbeat(t *testing.T) {
 	var current struct {
 		Connected bool `json:"connected"`
 	}
-	if _, err := client.Do(t.Context(), Request{Method: http.MethodGet, Route: "/server/session"}, &current); err != nil {
+	if _, err := client.do(t.Context(), request{Method: http.MethodGet, Route: "/server/session"}, &current); err != nil {
 		t.Fatal(err)
 	}
 	if current.Connected {
@@ -38,7 +38,7 @@ func TestLiveAraControlSessionAndHeartbeat(t *testing.T) {
 	var state struct {
 		ResumeToken string `json:"ws_resume_token"`
 	}
-	if _, err := client.Do(t.Context(), Request{Method: http.MethodGet, Route: "/server/state"}, &state); err != nil {
+	if _, err := client.do(t.Context(), request{Method: http.MethodGet, Route: "/server/state"}, &state); err != nil {
 		t.Fatal(err)
 	}
 	session, _, err := client.ConnectWithRequestID(t.Context(), "ara-mcp-live-check", nil, "live-control-check")
@@ -115,7 +115,7 @@ func TestLiveAraControlSessionAndHeartbeat(t *testing.T) {
 	if session.SessionID() != priorSessionID {
 		t.Fatal("Ara returned a different session capability during re-claim")
 	}
-	if _, err := client.Do(t.Context(), Request{Method: http.MethodGet, Route: "/server/state"}, &state); err != nil {
+	if _, err := client.do(t.Context(), request{Method: http.MethodGet, Route: "/server/state"}, &state); err != nil {
 		t.Fatal(err)
 	}
 	connection, err = client.OpenControlWebSocket(t.Context(), session)

@@ -38,7 +38,7 @@ func TestDo_TimeoutLeavesMutationUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := client.Do(t.Context(), Request{
+	result, err := client.do(t.Context(), request{
 		Method:     http.MethodPost,
 		Route:      "/sequences/{id}/start",
 		PathParams: map[string]string{"id": "7db1118d-57d9-4657-9779-8e1e619b12c4"},
@@ -91,7 +91,7 @@ func TestDo_RejectsInvalidRouteBeforeDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.Do(t.Context(), Request{
+	_, err = client.do(t.Context(), request{
 		Method:     http.MethodGet,
 		Route:      "/sequences/{id}",
 		PathParams: map[string]string{"id": "one/two"},
@@ -116,7 +116,7 @@ func TestDo_IdempotentSequenceCreateIsTheOnlyRetrySafeUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := client.Do(t.Context(), Request{
+	result, err := client.do(t.Context(), request{
 		Method:         http.MethodPost,
 		Route:          "/sequences",
 		Body:           []byte(`{"name":"plan","body":{}}`),
@@ -168,7 +168,7 @@ func TestDo_PreservesRequestAndDecodesResponse(t *testing.T) {
 	var decoded struct {
 		ID string `json:"id"`
 	}
-	result, err := client.Do(t.Context(), Request{
+	result, err := client.do(t.Context(), request{
 		Method:         http.MethodPost,
 		Route:          "/sequences",
 		Query:          map[string][]string{"name": {"M31 test"}},
@@ -200,7 +200,7 @@ func TestDo_EmptyAcceptedBodyAndSanitizedProblem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := client.Do(t.Context(), Request{Method: http.MethodPost, Route: "/server/emergency-stop"}, new(struct{}))
+		result, err := client.do(t.Context(), request{Method: http.MethodPost, Route: "/server/emergency-stop"}, new(struct{}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -219,7 +219,7 @@ func TestDo_EmptyAcceptedBodyAndSanitizedProblem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := client.Do(t.Context(), Request{Method: http.MethodPost, Route: "/sequences/{id}/start", PathParams: map[string]string{"id": "run-sequence"}}, nil)
+		result, err := client.do(t.Context(), request{Method: http.MethodPost, Route: "/sequences/{id}/start", PathParams: map[string]string{"id": "run-sequence"}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +239,7 @@ func TestDo_EmptyAcceptedBodyAndSanitizedProblem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := client.Do(t.Context(), Request{Method: http.MethodPost, Route: "/server/connect"}, nil)
+		result, err := client.do(t.Context(), request{Method: http.MethodPost, Route: "/server/connect"}, nil)
 		if result.Outcome != OutcomeFailed {
 			t.Errorf("outcome = %q, want %q", result.Outcome, OutcomeFailed)
 		}
@@ -271,7 +271,7 @@ func TestDo_ReadRetriesAndMutationIsNotRetried(t *testing.T) {
 		var body struct {
 			OK bool `json:"ok"`
 		}
-		result, err := client.Do(t.Context(), Request{Method: http.MethodGet, Route: "/server/info"}, &body)
+		result, err := client.do(t.Context(), request{Method: http.MethodGet, Route: "/server/info"}, &body)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -291,7 +291,7 @@ func TestDo_ReadRetriesAndMutationIsNotRetried(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := client.Do(t.Context(), Request{
+		result, err := client.do(t.Context(), request{
 			Method:     http.MethodPost,
 			Route:      "/sequences/{id}/start",
 			PathParams: map[string]string{"id": "7db1118d-57d9-4657-9779-8e1e619b12c4"},
@@ -316,7 +316,7 @@ func TestDo_ReadRetriesAndMutationIsNotRetried(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := client.Do(t.Context(), Request{Method: http.MethodPost, Route: "/server/connect"}, nil)
+		result, err := client.do(t.Context(), request{Method: http.MethodPost, Route: "/server/connect"}, nil)
 		if err == nil || result.Outcome != OutcomeUnknown || requests.Load() != 1 {
 			t.Fatalf("result=%+v error=%v requests=%d, want one uncertain non-followed request", result, err, requests.Load())
 		}
@@ -342,7 +342,7 @@ func TestDo_CursorPageAndBoundedResponse(t *testing.T) {
 		var page Page[struct {
 			ID string `json:"id"`
 		}]
-		result, err := client.Do(t.Context(), Request{
+		result, err := client.do(t.Context(), request{
 			Method: http.MethodGet,
 			Route:  "/sequences",
 			Query:  map[string][]string{"limit": {"25"}, "cursor": {"opaque+cursor/with?reserved"}},
@@ -364,7 +364,7 @@ func TestDo_CursorPageAndBoundedResponse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := client.Do(t.Context(), Request{Method: http.MethodGet, Route: "/server/info"}, new(struct{}))
+		result, err := client.do(t.Context(), request{Method: http.MethodGet, Route: "/server/info"}, new(struct{}))
 		var requestError *RequestError
 		if !errors.As(err, &requestError) || requestError.Class != "response_too_large" || result.Outcome != OutcomeFailed {
 			t.Fatalf("result=%+v error=%v, want bounded response error", result, err)
@@ -701,7 +701,7 @@ func TestDo_RecordsSanitizedMetricsAndTraceForDecodeFailure(t *testing.T) {
 	var decoded struct {
 		OK bool `json:"ok"`
 	}
-	result, err := client.Do(ctx, Request{
+	result, err := client.do(ctx, request{
 		Method: http.MethodGet,
 		Route:  "/sequences/{id}",
 		PathParams: map[string]string{
@@ -715,7 +715,7 @@ func TestDo_RecordsSanitizedMetricsAndTraceForDecodeFailure(t *testing.T) {
 	if traceparentCount.Load() != 1 {
 		t.Fatalf("requests with traceparent = %d, want 1", traceparentCount.Load())
 	}
-	_, err = client.Do(ctx, Request{Method: http.MethodGet, Route: "/server/state"}, nil)
+	_, err = client.do(ctx, request{Method: http.MethodGet, Route: "/server/state"}, nil)
 	if !errors.As(err, &requestError) || requestError.Class != "timeout" {
 		t.Fatalf("deadline error = %v, want timeout RequestError", err)
 	}

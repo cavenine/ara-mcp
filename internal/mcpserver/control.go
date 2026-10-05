@@ -6,6 +6,7 @@ package mcpserver
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -95,6 +96,7 @@ type RunSnapshot struct {
 type MutationReceipt struct {
 	Outcome    ara.Outcome `json:"outcome"`
 	ReceiptID  string      `json:"receipt_id,omitempty"`
+	SequenceID string      `json:"sequence_id,omitempty"`
 	ErrorClass string      `json:"error_class,omitempty"`
 	RetrySafe  bool        `json:"retry_safe"`
 	Replayed   bool        `json:"replayed,omitempty"`
@@ -113,7 +115,7 @@ type controlIdentity struct {
 	apiVersion    string
 	daemonVersion string
 	daemonGitSHA  string
-	apiSurfaces   []APISurface
+	apiSurfaces   []ara.APISurface
 	profileID     string
 	resumeToken   string
 }
@@ -246,24 +248,25 @@ func newControlMetrics(meter metric.Meter) (controlMetrics, error) {
 }
 
 func readControlIdentity(ctx context.Context, client *ara.Client, requestID string) (controlIdentity, error) {
-	var info ServerInfo
-	var versions ServerVersions
+	info, _, err := client.GetServerInfoWithRequestID(ctx, requestID)
+	if err != nil {
+		return controlIdentity{}, fmt.Errorf("read Ara server info before control: %w", err)
+	}
+	versions, _, err := client.GetServerVersionsWithRequestID(ctx, requestID)
+	if err != nil {
+		return controlIdentity{}, fmt.Errorf("read Ara server versions before control: %w", err)
+	}
+	stateBody, _, err := client.GetServerStateWithRequestID(ctx, requestID)
+	if err != nil {
+		return controlIdentity{}, fmt.Errorf("read Ara server state before control: %w", err)
+	}
 	var state struct {
 		ServerUUID       string  `json:"server_uuid"`
 		CurrentProfileID *string `json:"current_profile_id"`
 		ResumeToken      string  `json:"ws_resume_token"`
 	}
-	for _, request := range []struct {
-		route string
-		out   any
-	}{
-		{route: "/server/info", out: &info},
-		{route: "/server/versions", out: &versions},
-		{route: "/server/state", out: &state},
-	} {
-		if _, err := client.Do(ctx, ara.Request{Method: http.MethodGet, Route: request.route, RequestID: requestID}, request.out); err != nil {
-			return controlIdentity{}, fmt.Errorf("read Ara %s before control: %w", request.route, err)
-		}
+	if err := json.Unmarshal(stateBody, &state); err != nil {
+		return controlIdentity{}, fmt.Errorf("decode Ara server state before control: %w", err)
 	}
 	identity := controlIdentity{
 		serverUUID: info.UUID, serverVersion: info.Version, apiVersion: info.API,
@@ -318,11 +321,8 @@ func (m *ControlManager) Begin(ctx context.Context, requestID string) (result Be
 		return BeginControlResult{}, fmt.Errorf("check configured Ara profile: %w", err)
 	}
 	if previousPhase == "claim_unknown" {
-		var current struct {
-			Connected bool   `json:"connected"`
-			Hostname  string `json:"hostname"`
-		}
-		if _, err := m.client.Do(ctx, ara.Request{Method: http.MethodGet, Route: "/server/session", RequestID: requestID}, &current); err != nil {
+		current, _, err := m.client.GetServerSessionWithRequestID(ctx, requestID)
+		if err != nil {
 			m.setAcquirePhase("claim_unknown")
 			return BeginControlResult{}, fmt.Errorf("reconcile previous Ara control claim: %w", err)
 		}
@@ -857,7 +857,7 @@ func boundedMutationErrorClass(value string) string {
 	case "", "none":
 		return "none"
 	case "busy", "control_lost", "invalid_receipt", "intent_conflict", "run_state_unknown", "timeout", "cancelled", "network", "decode",
-		"response_too_large", "invalid_argument", "not_found", "upstream_conflict", "upstream_unavailable",
+		"response_too_large", "invalid_argument", "invalid_upstream_request", "not_found", "upstream_conflict", "upstream_unavailable",
 		"invalid_upstream_response", "upstream_error", "uncertain", "run_active", "stale_run_id", "adapter_error":
 		return value
 	default:
@@ -969,12 +969,8 @@ func (m *ControlManager) verifyControlSession(ctx context.Context, controlID str
 		m.invalidateActiveControl(connection)
 		return errControlID
 	}
-	var currentSession struct {
-		Connected   bool     `json:"connected"`
-		Hostname    string   `json:"hostname"`
-		IdleSeconds *float64 `json:"idle_seconds"`
-	}
-	if _, err := m.client.Do(ctx, ara.Request{Method: http.MethodGet, Route: "/server/session", RequestID: requestID}, &currentSession); err != nil {
+	currentSession, _, err := m.client.GetServerSessionWithRequestID(ctx, requestID)
+	if err != nil {
 		if apiError, ok := errors.AsType[*ara.APIError](err); ok && (apiError.Status == http.StatusNotFound || apiError.Status == http.StatusUnauthorized || apiError.Status == http.StatusForbidden) {
 			m.invalidateActiveControl(connection)
 			return errControlID
@@ -1045,13 +1041,9 @@ func (m *ControlManager) reconnectControlSession(ctx context.Context, oldConnect
 			return nil, false
 		}
 		if err == nil {
-			var sessionInfo struct {
-				Connected   bool     `json:"connected"`
-				Hostname    string   `json:"hostname"`
-				IdleSeconds *float64 `json:"idle_seconds"`
-			}
 			requestContext, requestCancel = context.WithTimeout(recoveryContext, 5*time.Second)
-			_, err = m.client.Do(requestContext, ara.Request{Method: http.MethodGet, Route: "/server/session", RequestID: requestID}, &sessionInfo)
+			sessionInfo, _, sessionErr := m.client.GetServerSessionWithRequestID(requestContext, requestID)
+			err = sessionErr
 			requestCancel()
 			if err == nil && (!sessionInfo.Connected || sessionInfo.Hostname != session.Hostname || sessionInfo.IdleSeconds == nil || *sessionInfo.IdleSeconds < 0 || *sessionInfo.IdleSeconds >= 60) {
 				return nil, false

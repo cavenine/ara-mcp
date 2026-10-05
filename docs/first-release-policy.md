@@ -117,6 +117,16 @@ but reject unsupported executable types and malformed parameters rather than run
 them or silently discard them. Initially support only verified bounded loop forms.
 Plugin/script instructions are not enabled by a generic body passthrough.
 
+T05's adapter palette is pinned to Ara commit
+`6374eede73383851486e6fb498a3311a3be58d82`: `SequentialContainer`, at most one
+`LoopCondition` (1–1,000 iterations) per container, `SwitchFilter`, `TakeExposure`,
+and `Annotation`; nesting is capped at 64 levels and expanded work at 1,000 sequence
+instructions. The static check preserves other metadata and reports unsupported execution
+separately from Ara's structural `valid` result. It does not establish active-profile
+filter membership, equipment capabilities, or readiness; T06 must refresh those
+before start. These adapter ceilings bound authored plans, not an upstream Ara
+guarantee.
+
 Before start, refresh profile/equipment context and verify the supported recipe/
 palette, required slots, filter references, available capabilities, known parameter
 bounds, and finite execution constraints. Then use Ara's validation as an additional
@@ -243,7 +253,7 @@ owners and explicit consequences rather than unspecified design choices.
 | --- | --- | --- |
 | O1 | Ara-specific release tag is not yet published; master `6374eede` is the current tested target. On first Ara release, test newest Ara tag and master independently. SDK v1.8.0 protocol set is selected; no named MCP-host compatibility promise. | T01/T03/T09; unknown builds cannot enable mutations. The repo's inherited N.I.N.A. `v1.10.1` tag is not an Ara release target. |
 | O2 | Receipt IDs do not correlate to run IDs; `sequence.failed` is emitted but missing from WS catalog; `ContinueOnError` can emit `instruction_failed` and still finish `completed`; the sequence list exposes run state only for returned items and ignores cursor continuation. Active-run emergency stop passed on OmniSim. | T01/T04/T06–T08; use instruction events plus per-sequence state where known, never infer success from a receipt alone or claim a global active-run scan; keep conflicts fail-closed. |
-| O3 | Finite `SequentialContainer`/`LoopCondition`/`SwitchFilter`/`TakeExposure` ran on OmniSim. Packaged LRGB frames were attributed to loop names, lacked filter metadata, and `frames_captured` lagged frame rows; complete metadata/preflight contract remains open. | T01/T05/T06; do not claim reliable target/filter attribution until Ara or adapter semantics are fixed and tested. |
+| O3 | Finite `SequentialContainer`/`LoopCondition`/`SwitchFilter`/`TakeExposure` ran on OmniSim; T05 now enforces that bounded authoring palette. Packaged LRGB frames were attributed to loop names, lacked filter metadata, and `frames_captured` lagged frame rows; complete execution metadata/preflight contract remains open. | T01/T06; do not claim reliable target/filter attribution until Ara or adapter execution semantics are fixed and tested. |
 | O4 | Datastar frontend/Go SDK released version pair, local asset licensing, and actual browser/auth behavior | T12; verify before publishing a working dashboard claim |
 | O5 | SBC measurements, footprint targets, histogram/default-limit adjustments, and cross-platform resource availability | T03/T12/T10; provisional budgets are not hardware support claims |
 | O6 | On current master, restart changed server UUID, cleared the session, and removed in-memory run state while preserving the saved sequence. Resume-epoch, interrupted-run and job evidence remain to verify on future release builds. | T04/T08 integration checks; invalidate control and report unknown until authoritative recovery |

@@ -138,7 +138,7 @@ func newHTTPGateway(config Config) (*httpGateway, error) {
 	}, nil
 }
 
-func (g *httpGateway) do(ctx context.Context, input Request, target any) (gatewayResponse, error) {
+func (g *httpGateway) do(ctx context.Context, input request, target any) (gatewayResponse, error) {
 	method, err := g.validate(input)
 	response := gatewayResponse{method: g.methodLabel(input.Method), route: g.routeLabel(input.Route)}
 	if err != nil {
@@ -184,7 +184,7 @@ func (g *httpGateway) do(ctx context.Context, input Request, target any) (gatewa
 	return response, errors.New("ara http gateway: retry attempts exhausted")
 }
 
-func (g *httpGateway) doAttempt(ctx context.Context, input Request, method string, target any) (response gatewayResponse, returnedErr error) {
+func (g *httpGateway) doAttempt(ctx context.Context, input request, method string, target any) (response gatewayResponse, returnedErr error) {
 	started := time.Now()
 	response.method, response.route = method, input.Route
 	response.result.Outcome = OutcomeFailed
@@ -293,7 +293,7 @@ func (g *httpGateway) doAttempt(ctx context.Context, input Request, method strin
 	return response, nil
 }
 
-func (g *httpGateway) validate(request Request) (string, error) {
+func (g *httpGateway) validate(request request) (string, error) {
 	method := strings.ToUpper(request.Method)
 	if !slices.Contains([]string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete}, method) {
 		return "", errors.New("unsupported method")
@@ -381,7 +381,7 @@ func queryValues(values map[string][]string) url.Values {
 	return query
 }
 
-func (g *httpGateway) shouldRetry(request Request, response gatewayResponse, err error) bool {
+func (g *httpGateway) shouldRetry(request request, response gatewayResponse, err error) bool {
 	if !g.isRead(request) {
 		return false
 	}
@@ -392,7 +392,7 @@ func (g *httpGateway) shouldRetry(request Request, response gatewayResponse, err
 	return response.result.Status == http.StatusBadGateway || response.result.Status == http.StatusServiceUnavailable || response.result.Status == http.StatusGatewayTimeout
 }
 
-func (g *httpGateway) isRead(request Request) bool {
+func (g *httpGateway) isRead(request request) bool {
 	return strings.EqualFold(request.Method, http.MethodGet)
 }
 
@@ -429,7 +429,7 @@ func (g *httpGateway) responseFailureOutcome(method string, status int) Outcome 
 	return OutcomeFailed
 }
 
-func (g *httpGateway) canRetryMutation(request Request, outcome Outcome) bool {
+func (g *httpGateway) canRetryMutation(request request, outcome Outcome) bool {
 	return outcome == OutcomeUnknown && strings.EqualFold(request.Method, http.MethodPost) && request.Route == "/sequences" && request.IdempotencyKey != ""
 }
 

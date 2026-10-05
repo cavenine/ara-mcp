@@ -7,7 +7,7 @@ package mcpserver
 
 import (
 	"context"
-	"net/http"
+	"encoding/json/v2"
 	"os"
 	"testing"
 
@@ -23,19 +23,21 @@ func TestLiveAraBeginControlRequiresProfileWithoutClaimingSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stateBody, _, err := client.GetServerStateWithRequestID(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var state struct {
 		CurrentProfileID *string `json:"current_profile_id"`
 	}
-	if _, err := client.Do(t.Context(), ara.Request{Method: http.MethodGet, Route: "/server/state"}, &state); err != nil {
+	if err := json.Unmarshal(stateBody, &state); err != nil {
 		t.Fatal(err)
 	}
 	if state.CurrentProfileID != nil && *state.CurrentProfileID != "" {
 		t.Skip("Ara has an active profile; leaving the configured rig untouched")
 	}
-	var session struct {
-		Connected bool `json:"connected"`
-	}
-	if _, err := client.Do(t.Context(), ara.Request{Method: http.MethodGet, Route: "/server/session"}, &session); err != nil {
+	session, _, err := client.GetServerSessionWithRequestID(t.Context(), "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if session.Connected {
@@ -49,10 +51,8 @@ func TestLiveAraBeginControlRequiresProfileWithoutClaimingSlot(t *testing.T) {
 	if _, err := control.Begin(t.Context(), "live-control-profile-check"); err == nil || err.Error() != "begin control requires a configured active Ara profile" {
 		t.Fatalf("Begin() error = %v, want active-profile prerequisite rejection", err)
 	}
-	var after struct {
-		Connected bool `json:"connected"`
-	}
-	if _, err := client.Do(t.Context(), ara.Request{Method: http.MethodGet, Route: "/server/session"}, &after); err != nil {
+	after, _, err := client.GetServerSessionWithRequestID(t.Context(), "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if after.Connected {

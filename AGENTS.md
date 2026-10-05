@@ -52,8 +52,9 @@ that library is actually used, not a reason to add the dependency.
 ara-mcp is a Go MCP adapter to OpenAstro Ara, using the official
 `github.com/modelcontextprotocol/go-sdk`. Read [README.md](README.md) for current
 status and [docs/architecture.md](docs/architecture.md) for the call flow and API
-evidence. T02's Ara HTTP client and T03's stdio server/read-only tools are implemented;
-HTTP transport and mutation tools remain planned.
+evidence. T02's Ara HTTP client, T03's stdio server/read tools, T04's control phase,
+T05's sequence authoring, and T13's diagnostics listener are implemented. Streamable
+HTTP, sequence execution, and manual equipment-action tools remain planned.
 
 The call flow is always:
 
@@ -64,6 +65,9 @@ AI agent -> ara-mcp -> Ara server -> AlpacaBridge/Alpaca server -> equipment
 - Ara owns equipment operations, sequences, persistence, and run state.
 - Reuse Ara's REST/WebSocket surface; do not add a second sequencer or hardware
   driver path here.
+- Keep Ara endpoint paths and request/response contracts in `internal/ara.Client`;
+  the generic HTTP gateway owns transport mechanics, and MCP/tool code does not
+  construct Ara routes directly.
 - Keep the same tool implementation for stdio and Streamable HTTP.
 - Verify endpoint handlers and actual service behavior, not just DTOs or OpenAPI
   declarations. Cite the Ara version/commit for compatibility claims.

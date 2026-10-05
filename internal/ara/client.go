@@ -41,9 +41,9 @@ type Config struct {
 // Client calls Ara through its HTTP gateway.
 type Client struct{ gateway *httpGateway }
 
-// Request describes an Ara route. Route is a template such as
+// request describes an Ara route. Route is a template such as
 // "/sequences/{id}"; PathParams supplies values for its placeholders.
-type Request struct {
+type request struct {
 	Method         string
 	Route          string
 	PathParams     map[string]string
@@ -115,8 +115,8 @@ func New(config Config) (*Client, error) {
 	return &Client{gateway: gateway}, nil
 }
 
-// Do sends one Ara request. Mutations are never retried by the client.
-func (c *Client) Do(ctx context.Context, request Request, response any) (Result, error) {
+// do sends one Ara request. Mutations are never retried by the client.
+func (c *Client) do(ctx context.Context, request request, response any) (Result, error) {
 	if ctx == nil {
 		return Result{Outcome: OutcomeFailed}, errors.New("ara request: context is required")
 	}
@@ -143,7 +143,7 @@ func (c *Client) ConnectWithRequestID(ctx context.Context, hostname string, sess
 		Hostname    string    `json:"hostname"`
 		ConnectedAt time.Time `json:"connected_at"`
 	}
-	result, err := c.Do(ctx, Request{
+	result, err := c.do(ctx, request{
 		Method: http.MethodPost, Route: "/server/connect", Body: body, RequestID: requestID,
 	}, &response)
 	if err != nil {
@@ -169,7 +169,7 @@ func (c *Client) DisconnectWithRequestID(ctx context.Context, session ControlSes
 	if err != nil {
 		return Result{Outcome: OutcomeFailed}, fmt.Errorf("encode Ara disconnect request: %w", err)
 	}
-	return c.Do(ctx, Request{
+	return c.do(ctx, request{
 		Method: http.MethodPost, Route: "/server/disconnect", Body: body, RequestID: requestID,
 	}, nil)
 }
@@ -189,7 +189,7 @@ func (c *Client) ListSequencesWithRequestID(ctx context.Context, limit int, requ
 		return Page[jsontext.Value]{}, Result{Outcome: OutcomeFailed}, errors.New("ara request: invalid sequence page parameters")
 	}
 	var page Page[jsontext.Value]
-	result, err := c.Do(ctx, Request{
+	result, err := c.do(ctx, request{
 		Method:    httpMethodGet,
 		Route:     "/sequences",
 		Query:     map[string][]string{"limit": {fmt.Sprint(limit)}},

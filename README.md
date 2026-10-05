@@ -14,14 +14,15 @@ interface alongside Ara's human-facing client.
 ## Status
 
 **Implementation in progress.** T02's Resty-backed Ara HTTP client, T03's stdio
-MCP server/read tools, T04's begin/end control-phase tools, and T13's optional
-diagnostics HTTP listener are implemented. Streamable HTTP MCP, sequence/equipment
-mutations, and a release are not available yet.
+MCP server/read tools, T04's begin/end control-phase tools, T05's sequence-authoring
+tools, and T13's optional diagnostics HTTP listener are implemented. Streamable HTTP
+MCP, sequence execution/equipment actions, and a release are not available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
-context, saved sequence pages/details, and adapter/process diagnostics. `begin_control`
-and `end_control` manage Ara's adapter session but do not change equipment or sequence
-state. Ara connectivity is needed only when calling Ara-backed tools; process
+context, saved sequence pages/details, sequence templates, validation results, and
+adapter/process diagnostics. `begin_control`/`end_control` manage Ara's adapter
+session. T05 can save, update, or instantiate plans through Ara; it does not start
+them. Ara connectivity is needed only when calling Ara-backed tools; process
 diagnostics remain available when Ara is offline. Optional HTTP diagnostics expose
 `/healthz`, `/readyz`, `/status`, and `/metrics` separately.
 
@@ -85,8 +86,23 @@ and [SBC validation](docs/development.md#small-sbc-validation).
 
 - `get_server_context`: Ara identity, API versions, and state.
 - `get_rig_context`: profile, site/imaging defaults, filters, and available device status.
-- `list_sequences` and `get_sequence`: bounded saved-sequence listing and detail.
+- `list_sequences`, `get_sequence`, `list_sequence_templates`, and
+  `validate_sequence`: inspect saved plans/templates and run structural/palette
+  validation. Neither validation confirms rig compatibility or readiness.
 - `get_adapter_diagnostics`: Ara reachability and local process/runtime sample.
+
+## Sequence-authoring tools
+
+- `list_sequence_templates`: inspect Ara templates and opaque bodies.
+- `validate_sequence`: return Ara's structural result plus the adapter's bounded
+  executable-palette check. Neither is rig/equipment preflight.
+- `create_sequence` and `update_sequence`: save or edit Ara plans through the T04
+  control/intent dispatcher.
+- `instantiate_sequence_template`: ask Ara to substitute template parameters and
+  save a plan. No authoring tool starts a sequence.
+
+See the [sequence-authoring recipe](docs/sequence-authoring.md) for the pinned
+`lrgb-dso` example, validation limits, and review steps.
 
 ## Control-phase tools
 
@@ -101,12 +117,13 @@ and [SBC validation](docs/development.md#small-sbc-validation).
   intent receipt ledger; lifecycle preflights fail closed on unknown run state. A
   reserved interrupt lane remains available when normal admission is saturated.
 
-No sequence or equipment mutation tools are available yet. See [T04](docs/plan.md#t04-ara-control-ownership-and-connection-lifecycle)
-for outstanding arbitration and recovery work.
+Sequence execution and equipment-action tools are not available yet. Saved-plan
+mutations require the active control ID and intent ID and do not run equipment.
+See [T04](docs/plan.md#t04-ara-control-ownership-and-connection-lifecycle) and
+[T05](docs/plan.md#t05-sequence-authoring) for the control and authoring contracts.
 
 ## Planned capabilities
 
-- Create, inspect, validate, and update sequences, including template-based plans.
 - Start, pause, resume, stop, and monitor sequences.
 - Request manual actions through Ara, such as exposures, slews, and autofocus.
 - Retrieve image previews and operation results.
