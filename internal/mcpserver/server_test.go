@@ -77,8 +77,8 @@ func TestGetServerContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 7 {
-		t.Fatalf("discovered %d tools, want 7", len(tools.Tools))
+	if len(tools.Tools) != 8 {
+		t.Fatalf("discovered %d tools, want 8", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
@@ -373,6 +373,8 @@ func TestGetRigContextReportsUnselectedDevices(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/server/state":
 			_, _ = w.Write([]byte(`{"current_profile_id":null}`))
+		case "/api/v1/profiles":
+			_, _ = w.Write([]byte(`{"active_id":null,"profiles":[]}`))
 		case "/api/v1/profile/site":
 			_, _ = w.Write([]byte(`{"latitude":51.5,"longitude":-0.1}`))
 		case "/api/v1/profile/imaging-defaults":
@@ -426,6 +428,41 @@ func TestGetRigContextReportsUnselectedDevices(t *testing.T) {
 		if device.Available {
 			t.Errorf("unselected %s was reported available: %s", name, encoded)
 		}
+	}
+}
+
+func TestGetRigContextUsesAraProfileRepositorySelection(t *testing.T) {
+	const profileID = "e1d64755-e2ae-46f1-aa43-c6e67419e1e9"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/server/state":
+			_, _ = w.Write([]byte(`{"current_profile_id":null}`))
+		case "/api/v1/profiles":
+			_, _ = w.Write([]byte(`{"active_id":"` + profileID + `","profiles":[{"id":"` + profileID + `","name":"test"}]}`))
+		case "/api/v1/profile/site":
+			_, _ = w.Write([]byte(`{}`))
+		case "/api/v1/profile/imaging-defaults":
+			_, _ = w.Write([]byte(`{}`))
+		case "/api/v1/profile/filter-wheel/labels", "/api/v1/profile/filter-set":
+			_, _ = w.Write([]byte(`{}`))
+		case "/api/v1/equipment/camera", "/api/v1/equipment/telescope", "/api/v1/equipment/focuser", "/api/v1/equipment/filterwheel":
+			http.NotFound(w, r)
+		default:
+			t.Errorf("unexpected Ara request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := getRigContext(t.Context(), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CurrentProfileID == nil || *got.CurrentProfileID != profileID {
+		t.Fatalf("active profile = %v, want %s", got.CurrentProfileID, profileID)
 	}
 }
 

@@ -7,6 +7,15 @@ and dated headings. No release has been published.
 
 ### Added
 
+- T06 sequence execution tools: `get_sequence_state`, `start_sequence`,
+  `pause_sequence`, `resume_sequence`, `stop_sequence`, and `abort_sequence`.
+  Start checks the saved plan, Ara validation, palette, selected profile, connected
+  devices, live camera limits, and filter slots; authoring/start reject
+  `ContinueOnError` plans.
+  Run-control checks `expected_run_id`, stop/abort use the reserved lane, and accepted
+  commands remain distinct from observed state. Ara's profile-library selection is
+  used when its server-state placeholder is null. The lifecycle was exercised on the
+  pinned RPi4 OmniSim setup; current-master/release compatibility remains gated by O1.
 - T05 sequence-authoring tools for template listing/instantiation, `validate_sequence`,
   saved-plan create/update through T04 arbitration, opaque body preservation, and a
   bounded executable-palette check. Ara validation is structural, not rig preflight.

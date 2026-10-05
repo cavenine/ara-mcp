@@ -34,6 +34,7 @@ var (
 	errIntentCapacity  = errors.New("control phase intent receipt capacity exhausted")
 	errMutationBusy    = errors.New("another mutation is already being dispatched")
 	errRunActive       = errors.New("manual action or sequence start conflicts with an active run")
+	errRunInactive     = errors.New("ara sequence run is not active")
 	errStaleRunID      = errors.New("expected_run_id does not match current Ara state")
 	errRunStateUnknown = errors.New("ara run state is unavailable; mutation was not dispatched")
 	errClaimUnknown    = errors.New("ara control claim is unresolved; inspect the Ara session before retrying")
@@ -276,10 +277,25 @@ func readControlIdentity(ctx context.Context, client *ara.Client, requestID stri
 	if identity.serverUUID == "" || identity.serverVersion == "" || identity.apiVersion == "" || state.ServerUUID != identity.serverUUID {
 		return controlIdentity{}, errors.New("Ara server identity is incomplete or inconsistent")
 	}
-	if state.CurrentProfileID != nil {
-		identity.profileID = strings.TrimSpace(*state.CurrentProfileID)
+	identity.profileID, err = selectedProfileID(ctx, client, state.CurrentProfileID, requestID)
+	if err != nil {
+		return controlIdentity{}, err
 	}
 	return identity, nil
+}
+
+func selectedProfileID(ctx context.Context, client *ara.Client, serverStateID *string, requestID string) (string, error) {
+	if serverStateID != nil && strings.TrimSpace(*serverStateID) != "" {
+		return strings.TrimSpace(*serverStateID), nil
+	}
+	profiles, _, err := client.ListProfilesWithRequestID(ctx, requestID)
+	if err != nil {
+		return "", fmt.Errorf("read selected Ara profile: %w", err)
+	}
+	if profiles.ActiveID == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*profiles.ActiveID), nil
 }
 
 // Begin checks for an active Ara profile, claims the control slot, and binds its
@@ -616,11 +632,12 @@ func (m *ControlManager) DispatchMutation(ctx context.Context, request MutationR
 	default:
 		return MutationReceipt{}, errInvalidIntent
 	}
-	needsRunSnapshot := request.Kind == MutationManual || request.Kind == MutationStartRun || request.Kind == MutationRunControl
+	needsRunSnapshot := request.Kind == MutationManual || request.Kind == MutationStartRun || request.Kind == MutationRunControl ||
+		(request.Kind == MutationInterrupt && request.ExpectedRunID != "")
 	if needsRunSnapshot && request.Preflight == nil {
 		return MutationReceipt{}, errRunStateUnknown
 	}
-	if request.Kind == MutationRunControl && request.ExpectedRunID == "" {
+	if (request.Kind == MutationRunControl || request.Kind == MutationInterrupt && request.Preflight != nil) && request.ExpectedRunID == "" {
 		return MutationReceipt{}, errStaleRunID
 	}
 	hasher := sha256.New()
@@ -726,8 +743,13 @@ func (m *ControlManager) DispatchMutation(ctx context.Context, request MutationR
 		if (request.Kind == MutationManual || request.Kind == MutationStartRun) && snapshot.ActiveRun {
 			return m.rejectUndispatchedMutation(request.IntentID, entry, tracked, "run_active", errRunActive)
 		}
-		if request.Kind == MutationRunControl && snapshot.RunID != request.ExpectedRunID {
-			return m.rejectUndispatchedMutation(request.IntentID, entry, tracked, "stale_run_id", errStaleRunID)
+		if request.Kind == MutationRunControl || request.Kind == MutationInterrupt && request.ExpectedRunID != "" {
+			if !snapshot.ActiveRun {
+				return m.rejectUndispatchedMutation(request.IntentID, entry, tracked, "run_not_active", errRunInactive)
+			}
+			if snapshot.RunID != request.ExpectedRunID {
+				return m.rejectUndispatchedMutation(request.IntentID, entry, tracked, "stale_run_id", errStaleRunID)
+			}
 		}
 		m.mu.Lock()
 		stillOwned := !m.closed && m.phase == "owned" && request.ControlID == m.controlID
@@ -858,7 +880,7 @@ func boundedMutationErrorClass(value string) string {
 		return "none"
 	case "busy", "control_lost", "invalid_receipt", "intent_conflict", "run_state_unknown", "timeout", "cancelled", "network", "decode",
 		"response_too_large", "invalid_argument", "invalid_upstream_request", "not_found", "upstream_conflict", "upstream_unavailable",
-		"invalid_upstream_response", "upstream_error", "uncertain", "run_active", "stale_run_id", "adapter_error":
+		"invalid_upstream_response", "upstream_error", "uncertain", "run_active", "run_not_active", "stale_run_id", "adapter_error":
 		return value
 	default:
 		return "other"

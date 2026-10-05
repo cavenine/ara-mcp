@@ -95,6 +95,11 @@ func (c *Client) GetProfileImagingDefaultsWithRequestID(ctx context.Context, req
 	return c.getJSONWithRequestID(ctx, "/profile/imaging-defaults", requestID)
 }
 
+// GetProfileStorageWithRequestID reads the selected profile's capture storage settings.
+func (c *Client) GetProfileStorageWithRequestID(ctx context.Context, requestID string) (jsontext.Value, Result, error) {
+	return c.getJSONWithRequestID(ctx, "/profile/storage", requestID)
+}
+
 // GetProfileFilterWheelLabelsWithRequestID reads configured filter-wheel labels.
 func (c *Client) GetProfileFilterWheelLabelsWithRequestID(ctx context.Context, requestID string) (jsontext.Value, Result, error) {
 	return c.getJSONWithRequestID(ctx, "/profile/filter-wheel/labels", requestID)

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"net/http"
 )
 
@@ -54,6 +55,79 @@ func (c *Client) GetSequenceWithRequestID(ctx context.Context, id, requestID str
 		PathParams: map[string]string{"id": id}, RequestID: requestID,
 	}, &response)
 	return response, result, err
+}
+
+// GetSequenceStateWithRequestID reads Ara's current in-memory run state.
+func (c *Client) GetSequenceStateWithRequestID(ctx context.Context, id, requestID string) (jsontext.Value, Result, error) {
+	var response jsontext.Value
+	result, err := c.do(ctx, request{
+		Method: http.MethodGet, Route: "/sequences/{id}/state",
+		PathParams: map[string]string{"id": id}, RequestID: requestID,
+	}, &response)
+	return response, result, err
+}
+
+// DeleteSequenceWithRequestID deletes a saved sequence after its run is terminal.
+func (c *Client) DeleteSequenceWithRequestID(ctx context.Context, id, requestID string) (Result, error) {
+	return c.do(ctx, request{
+		Method: http.MethodDelete, Route: "/sequences/{id}",
+		PathParams: map[string]string{"id": id}, RequestID: requestID,
+	}, nil)
+}
+
+// StartSequenceWithRequestID starts Ara execution with the only verified request
+// options. The 202 response is acceptance, not completion.
+func (c *Client) StartSequenceWithRequestID(ctx context.Context, id, requestID string) (Result, error) {
+	body, err := json.Marshal(struct {
+		DryRun                      bool `json:"dry_run"`
+		StartFromInstructionIndex   *int `json:"start_from_instruction_index"`
+		ContinueOnRecoverableErrors bool `json:"continue_on_recoverable_errors"`
+	}{})
+	if err != nil {
+		return Result{Outcome: OutcomeFailed}, fmt.Errorf("encode Ara sequence start request: %w", err)
+	}
+	return c.do(ctx, request{
+		Method: http.MethodPost, Route: "/sequences/{id}/start",
+		PathParams: map[string]string{"id": id}, Body: body, RequestID: requestID,
+	}, nil)
+}
+
+// PauseSequenceWithRequestID asks Ara to pause the identified sequence run.
+func (c *Client) PauseSequenceWithRequestID(ctx context.Context, id, requestID string) (Result, error) {
+	return c.sequenceRunControl(ctx, id, "pause", requestID)
+}
+
+// ResumeSequenceWithRequestID asks Ara to resume the identified sequence run
+// using Ara's defaults; no unverified resume options are exposed.
+func (c *Client) ResumeSequenceWithRequestID(ctx context.Context, id, requestID string) (Result, error) {
+	body, err := json.Marshal(struct {
+		Recenter bool `json:"recenter"`
+		Refocus  bool `json:"refocus"`
+	}{})
+	if err != nil {
+		return Result{Outcome: OutcomeFailed}, fmt.Errorf("encode Ara sequence resume request: %w", err)
+	}
+	return c.do(ctx, request{
+		Method: http.MethodPost, Route: "/sequences/{id}/resume",
+		PathParams: map[string]string{"id": id}, Body: body, RequestID: requestID,
+	}, nil)
+}
+
+// StopSequenceWithRequestID asks Ara to stop the identified sequence run.
+func (c *Client) StopSequenceWithRequestID(ctx context.Context, id, requestID string) (Result, error) {
+	return c.sequenceRunControl(ctx, id, "stop", requestID)
+}
+
+// AbortSequenceWithRequestID asks Ara to abort the identified sequence run.
+func (c *Client) AbortSequenceWithRequestID(ctx context.Context, id, requestID string) (Result, error) {
+	return c.sequenceRunControl(ctx, id, "abort", requestID)
+}
+
+func (c *Client) sequenceRunControl(ctx context.Context, id, action, requestID string) (Result, error) {
+	return c.do(ctx, request{
+		Method: http.MethodPost, Route: "/sequences/{id}/" + action,
+		PathParams: map[string]string{"id": id}, RequestID: requestID,
+	}, nil)
 }
 
 // ListSequenceTemplatesWithRequestID lists Ara's sequence templates.
