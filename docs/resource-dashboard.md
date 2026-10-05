@@ -1,9 +1,8 @@
 # Resource monitoring, dashboard, and exports
 
-**Status:** required feature, not implemented. T03 introduces shared resource
-sampling; [T12](plan.md#t12-resource-dashboard-and-exports) delivers the dashboard,
-bounded history/archive, and downloads on T13's early diagnostics HTTP foundation,
-before T10 deployment validation.
+**Status:** T03's shared process/runtime sampler is implemented. The dashboard,
+bounded history/archive, and downloads remain for [T12](plan.md#t12-resource-dashboard-and-exports)
+on T13's early diagnostics HTTP foundation, before T10 deployment validation.
 
 The application monitors its own process/runtime usage and displays it on a
 self-hosted, automatically updating page. Statistics are downloadable as **CSV**

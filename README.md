@@ -13,9 +13,14 @@ interface alongside Ara's human-facing client.
 
 ## Status
 
-**Implementation in progress.** The Resty-backed Ara HTTP client and contract tests
-are under development. MCP tools, transports, and authentication are not implemented;
-there is no runnable server or release.
+**Implementation in progress.** T02's Resty-backed Ara HTTP client is complete.
+T03 adds a runnable stdio MCP server with read-only Ara tools and local adapter
+diagnostics. Streamable HTTP, mutations, and a release are not available yet.
+
+The current tool set reads Ara server identity/version/state, rig/profile/device
+context, saved sequence pages/details, and adapter/process diagnostics. No tool
+changes equipment or sequence state. Ara connectivity is needed only when calling
+Ara-backed tools; local diagnostics remain available when Ara is offline.
 
 ## Architecture
 
@@ -35,9 +40,9 @@ AlpacaBridge (or another compatible Alpaca device server)
 Astrophotography equipment
 ```
 
-The intended implementation uses the official
-[MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk). Both deployment modes
-share the same tool handlers and Ara API integration:
+The stdio server uses the official
+[MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk). Planned Streamable
+HTTP will share the same tool handlers and Ara API integration:
 
 | Mode | MCP transport | Connection to Ara | Lifecycle |
 | --- | --- | --- | --- |
@@ -47,9 +52,9 @@ share the same tool handlers and Ara API integration:
 Running ara-mcp beside Ara does not require embedding it in Ara. Ara continues an
 imaging session when the agent or adapter disconnects.
 
-Application commands will use Cobra; configuration will use Viper. Their required
-precedence and validation are documented in the
-[development guide](docs/development.md#application-commands-and-configuration).
+The executable uses Cobra and Viper. Configuration precedence is explicit flags >
+`ARA_MCP_*` environment > optional config file > defaults; details and runnable
+commands are in the [development guide](docs/development.md#application-commands-and-configuration).
 HTTP serving will use Chi v5, its middleware, and go-chi/render, with structured
 `slog` request logging and the MCP SDK's handler preserving protocol framing.
 See [HTTP architecture](docs/architecture.md#http-stack).
@@ -73,9 +78,15 @@ establish that the complete imaging stack fits on a Pi 3. See
 [resource constraints](docs/architecture.md#deployment-targets-and-resource-constraints)
 and [SBC validation](docs/development.md#small-sbc-validation).
 
+## Available read-only tools
+
+- `get_server_context`: Ara identity, API versions, and state.
+- `get_rig_context`: profile, site/imaging defaults, filters, and available device status.
+- `list_sequences` and `get_sequence`: bounded saved-sequence listing and detail.
+- `get_adapter_diagnostics`: Ara reachability and local process/runtime sample.
+
 ## Planned capabilities
 
-- Read server, equipment, and imaging-session state.
 - Create, inspect, validate, and update sequences, including template-based plans.
 - Start, pause, resume, stop, and monitor sequences.
 - Request manual actions through Ara, such as exposures, slews, and autofocus.
@@ -86,10 +97,9 @@ and [SBC validation](docs/development.md#small-sbc-validation).
 - Optionally retain bounded rotating JSONL resource history across restarts for
   postmortem diagnostics; the persistent-service example will enable it.
 
-These are implementation goals, not currently available tools. See the
-[architecture and API notes](docs/architecture.md) for the existing Ara API and
-integration constraints, and the [implementation plan](docs/plan.md) for delivery
-order and acceptance criteria.
+These remain implementation goals. See the [architecture and API notes](docs/architecture.md)
+for the existing Ara API and integration constraints, and the
+[implementation plan](docs/plan.md) for delivery order and acceptance criteria.
 
 ## Development
 
@@ -97,9 +107,9 @@ Use Go **1.27.x**, preferably its latest patch release, and Git. The module decl
 Go 1.27.0 and selects Go 1.27.1 as its default toolchain. With automatic toolchain
 switching enabled, Go can download that toolchain when needed.
 
-Follow the [development guide](docs/development.md) for setup, build/check commands,
-testing, and agent workflows. At this stage, the Go checks cover package
-documentation; there are no executable packages or behavior tests yet.
+Follow the [development guide](docs/development.md) for setup, run/build/check
+commands, testing, and agent workflows. Default checks are hardware-free; read-only
+Ara simulator integration is opt-in.
 
 Development and agent-local deployment should remain portable across Linux,
 macOS, and Windows. Telescope-side deployment targets Linux ARM64 SBCs as described

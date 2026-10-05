@@ -11,10 +11,11 @@ tag and current `master` independently. The checkout's Git tag `v1.10.1` is
 inherited N.I.N.A. code dated 2020-10-18, not an Ara release. Current master
 evidence below is pinned to its exact commit.
 
-The MCP contract targets the official Go SDK's supported protocol revisions. No
-named host application (Claude Desktop, Cursor, VS Code, etc.) is promised yet;
-stdio/HTTP host-specific checks belong with T03/T09. Ara's Flutter WILMA client
-speaks Ara REST/WebSocket and is not an MCP host.
+The MCP contract targets the official Go SDK's supported protocol revisions. T03
+tests SDK tool discovery/calls in memory and process-level stdio framing; no named
+host application (Claude Desktop, Cursor, VS Code, etc.) is promised or verified.
+Streamable HTTP checks belong with T09. Ara's Flutter WILMA client speaks Ara
+REST/WebSocket and is not an MCP host.
 
 ## Evidence baseline
 

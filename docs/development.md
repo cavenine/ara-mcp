@@ -23,15 +23,16 @@ This guide owns setup and verification commands for ara-mcp. Read
 
 ## Current state
 
-The repository has an in-progress Resty-backed Ara HTTP client and its hardware-free
-contract tests, but no CLI or MCP listener yet. `go build ./...` does not produce a
-server executable.
+T02's Resty-backed Ara HTTP client and T03's executable stdio MCP server are
+implemented. The current tools are read-only; HTTP MCP, mutations, and a release
+are not available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
 [first-release-policy.md](first-release-policy.md).
-Add verified run commands and agent connection examples here when the executable
-and transports are implemented; the plan's proposed interface is not runnable today.
+The runnable command and agent configuration example are below. Ara is contacted
+only when an Ara-backed tool is called, so local diagnostics remain available while
+Ara is offline.
 
 ## Prerequisites
 
@@ -70,34 +71,84 @@ and checksum changes when adding or updating a dependency.
 | --- | --- |
 | [go.mod](../go.mod) | Module path, language baseline, and default toolchain |
 | [doc.go](../doc.go) | Initial package documentation |
+| [cmd/ara-mcp/](../cmd/ara-mcp/main.go) | Executable, signal handling, and process boundary |
+| [internal/app/](../internal/app/) | Cobra/Viper command, validated configuration, and stdio runtime |
+| [internal/mcpserver/](../internal/mcpserver/) | Shared typed MCP tools and tool instrumentation |
+| [internal/monitor/](../internal/monitor/) | Paced process/runtime sample |
+| [internal/ara/](../internal/ara/) | Resty-backed Ara HTTP client |
 | [docs/](.) | Architecture, development, observability, agent routing, and implementation plan |
 | [AGENTS.md](../AGENTS.md) | Shared coding-agent constraints |
 | [.agents/](../.agents/README.md) | Scoped rules, workflows, bundled skills, and their licenses |
 | [skills-lock.json](../skills-lock.json) | Upstream skill commits and hashes |
 | [.github/](../.github/) | CI, dependency updates, and contribution templates |
 
-When executable code is added, put the entrypoint in `cmd/ara-mcp/` and private
-code in focused `internal/` packages. These directories do not exist yet. Keep
-Ara communication separate from MCP tool/transport handling without building
-a plugin framework or duplicating logic between transports.
+Keep the executable in `cmd/ara-mcp/` and private code in focused `internal/`
+packages. Keep Ara communication separate from MCP tool/transport handling without
+building a plugin framework or duplicating logic between transports.
 
 ## Application commands and configuration
 
-The selected application stack is **Cobra** for command/flag handling and **Viper**
-for configuration. These dependencies and the executable will be added in T03;
-no commands or configuration keys are implemented today.
+The application uses **Cobra** for command/flag handling, **Viper** for configuration,
+and the official MCP Go SDK v1.8.0. The current command surface is `serve` (stdio)
+and `version`.
 
 Use explicit flags > environment > optional configuration file > defaults.
-Environment variables use the `ARA_MCP` prefix. Resolve known keys into a typed,
-validated configuration before opening connections; pass that configuration to
-runtime components instead of reading global Viper state from handlers.
+Environment variables use the `ARA_MCP` prefix. Supported settings:
+
+| Setting | Flag | Environment | Default |
+| --- | --- | --- | --- |
+| Ara base URL | `--ara-url` | `ARA_MCP_ARA_URL` | `http://127.0.0.1:5555` |
+| Transport | `--transport` | `ARA_MCP_TRANSPORT` | `stdio` |
+| Log level | `--log-level` | `ARA_MCP_LOG_LEVEL` | `info` |
+| Ara timeout | `--timeout` | `ARA_MCP_TIMEOUT` | `10s` |
+| GET retries | `--read-retries` | `ARA_MCP_READ_RETRIES` | `0` (maximum 2) |
+
+HTTP is recognized as a transport setting but remains unavailable until T09.
+Explicitly selected config files must exist and parse; no file is required. YAML:
+
+```yaml
+ara-url: http://127.0.0.1:5555
+transport: stdio
+log-level: info
+timeout: 10s
+read-retries: 0
+```
+
+Resolve keys once into a typed, validated configuration before constructing the
+client or transport. Runtime handlers do not read global Viper state.
 
 Command/configuration work loads `golang-cli`, `golang-spf13-cobra`, and
 `golang-spf13-viper`, then applicable testing/safety guidance. The
 [project rules](../.agents/rules/go.md#application-commands-and-configuration)
 cover binding, missing-file behavior, output, and test isolation. TDD checks must
 prove precedence, explicit false/zero inputs, validation failures, independent
-command/config instances, and protocol-only stdout when serving stdio.
+command/config instances, useful help/version without Ara, and protocol-only stdout
+when serving stdio.
+
+### Running and connecting over stdio
+
+```sh
+go run ./cmd/ara-mcp version
+ARA_MCP_ARA_URL=http://127.0.0.1:5555 go run ./cmd/ara-mcp serve
+go run ./cmd/ara-mcp --config ./ara-mcp.yaml serve
+```
+
+An agent configuration uses its supported MCP config format. Generic server entry:
+
+```json
+{
+  "mcpServers": {
+    "ara-mcp": {
+      "command": "/absolute/path/to/ara-mcp",
+      "args": ["--ara-url", "http://127.0.0.1:5555", "serve"]
+    }
+  }
+}
+```
+
+The process writes JSON logs to stderr and MCP frames to stdout only. Available
+tools are `get_server_context`, `get_rig_context`, `list_sequences`, `get_sequence`,
+and `get_adapter_diagnostics`. No named MCP host compatibility is claimed yet.
 
 The full [skill index](agent-instructions.md#public-go-skills) also routes type/
 generic safety and appropriate `lo`/`mo` use. Those helpers are selected for real
@@ -237,8 +288,7 @@ Ara's API declarations are not enough to establish support. Recheck backing
 services against the targeted Ara version. The current evidence and known gaps
 are in [architecture.md](architecture.md#contract-details-to-preserve).
 
-Live integration tests will be opt-in. Their connection configuration and commands
-must be documented when implemented. Record the Ara version, adapter commit,
+Live integration tests are opt-in. Record the Ara version, adapter commit,
 transport, OS/architecture, equipment if used, and operations exercised. Run
 mutating tests only on an explicitly selected test setup. Keep simulator results,
 cross-build results, and physical-rig results distinct.
@@ -246,11 +296,11 @@ cross-build results, and physical-rig results distinct.
 ## Logging and observability verification
 
 [observability.md](observability.md) owns the required log schema, metrics, traces,
-health behavior, and diagnostic access model. They are requirements today, not
-implemented runtime features. Add their behavioral tests in the same red-green
-slice as the operation being introduced.
-The [resource dashboard contract](resource-dashboard.md) covers shared process
-sampling, self-hosted SSE/HTML, bounded history, and CSV/JSONL exports (T03/T12).
+health behavior, and diagnostic access model. T03 implements stderr JSON logs,
+tool-call metrics/traces, Ara request correlation, and local process diagnostics for
+stdio. OTLP/Prometheus export and HTTP diagnostics serving remain later tasks.
+The [resource dashboard contract](resource-dashboard.md) covers the self-hosted
+SSE/HTML page, bounded history, and CSV/JSONL exports (T12).
 
 Use captured stderr/parsed log records, in-process metric registries, and in-memory
 trace exporters. Assert correlation, redaction, bounded labels, accepted versus
@@ -266,10 +316,9 @@ smoke check showing automatic updates with locally served assets and no external
 network dependency. T10 measures overhead rather than relying on flaky RSS assertions.
 
 Live checks must show how to retrieve stderr/journald logs and distinguish an
-adapter fault from an Ara operation failure. Once diagnostic serving is implemented,
-document the actual listener, access configuration, scrape example, OTLP settings,
-and profiling commands here or in the deployment guide. Do not require a remote
-collector for normal tests or to start a local stdio adapter.
+adapter fault from an Ara operation failure. No diagnostics HTTP listener, scrape
+endpoint, OTLP exporter, or profiling listener is implemented yet. Do not require a
+remote collector for normal tests or to start a local stdio adapter.
 
 Add a reproducible opt-in integration recipe against an actual Ara daemon with
 simulated equipment as the client/control/authoring tasks land, not only after
@@ -277,6 +326,26 @@ T10. Capture server build/API, profile/fixture setup, endpoint/WS results, and c
 Include restart/upgrade and completed-run replay cases from the
 [resolved recovery/operation policies](first-release-policy.md). Default tests
 remain isolated; physical-rig results are separate evidence.
+
+### Read-only Ara simulator recipe (opt-in)
+
+Use the Ara development build and OmniSim versions recorded in
+[api-contracts.md](api-contracts.md#pinned-alpaca-simulator-check-2026-10-04), with
+Ara's API bound to loopback and no route from the simulator to physical equipment.
+Connect simulated devices in Ara, then launch ara-mcp against that daemon:
+
+```sh
+ARA_MCP_ARA_URL=http://127.0.0.1:15555 go run ./cmd/ara-mcp serve
+```
+
+From an MCP client, list tools and call `get_server_context`, `get_rig_context`,
+`list_sequences`, and `get_sequence` for a saved test sequence. The rig context
+must show selected simulator devices as available and unselected devices as
+explicitly unavailable. `get_adapter_diagnostics` reports local process data and
+Ara reachability. This recipe uses read-only operations only. Record the daemon
+commit, OmniSim version, adapter commit, OS/architecture, and observations. The
+T01 simulator results are source evidence; this T03 MCP flow has not yet been run
+against the live daemon.
 
 ## Agent-assisted development
 
@@ -301,19 +370,17 @@ installation/update commands and preserved upstream licenses are documented in
 ## CI and portability
 
 [CI](../.github/workflows/ci.yml) runs formatting, module metadata, vet, shuffled
-race tests, and build checks on Linux with Go 1.27.x. It does not currently test
-macOS, Windows, or a physical ARM64 rig. Actions are SHA-pinned and updated by
+race tests, builds, and cross-builds on Linux with Go 1.27.x. It does not run native
+macOS/Windows tests or a physical ARM64 rig. Actions are SHA-pinned and updated by
 [Dependabot](../.github/dependabot.yml).
 
 Local-agent targets are Linux, macOS, and Windows. Telescope-side deployment
 targets Linux ARM64 SBCs, including Raspberry Pi 3/4/5-class boards with a 64-bit OS
-and limited CPU/RAM. Go 1.27 requires macOS 13 or newer on Darwin. Platform build
-checks, binaries, and a service installation example are planned in
-[T10](plan.md#t10-deployment-and-end-to-end-validation).
-T03 introduces Linux amd64/arm64, macOS amd64/arm64, and Windows amd64 cross-build
-checks when executable/OS-specific code lands, with native tests where available.
-Current CI is still the setup-only Linux job; early platform checks are planned,
-not a claim that those platforms are already tested.
+and limited CPU/RAM. Go 1.27 requires macOS 13 or newer on Darwin. CI cross-builds
+Linux amd64/arm64, macOS amd64/arm64, and Windows amd64; native platform tests,
+release binaries, and a service installation example remain in
+[T10](plan.md#t10-deployment-and-end-to-end-validation). Cross-builds do not
+establish runtime or hardware support.
 
 ## Small-SBC validation
 
@@ -327,6 +394,14 @@ low-resource hardware in T10. Record board/model, total and available RAM,
 OS/architecture, Go version, adapter commit/configuration, co-located workloads,
 payload/client counts, and thermal/throttling conditions. Compare the same toolchain
 and workload; a race build or active profiler is not the normal production footprint.
+
+T03 local baseline (2026-10-05): stripped `go build -trimpath -ldflags '-s -w'`
+binary on Linux/amd64 with Go 1.27.1, no Ara calls, idle for 2 seconds: 3 ms to
+startup log, 14,204 KiB RSS, 0.0% CPU rounded by `ps`, and 7 process threads.
+With one SDK `get_server_context` call against a local test HTTP endpoint, the
+process returned the result 18 ms from launch and used 16,980 KiB RSS, 0.0% rounded
+CPU, and 17 threads. These are container-host observations, not Pi/SBC or
+co-located-workload claims.
 
 Measure startup/idle and sustained normal/busy behavior: CPU, resident memory,
 live heap/allocations/GC, goroutine/connection counts, queue/backlog sizes, and tool

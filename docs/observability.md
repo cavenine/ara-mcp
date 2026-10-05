@@ -1,8 +1,8 @@
 # Logging and observability requirements
 
-**Status:** requirements for implementation. The repository does not yet contain
-a runtime logger, metrics, traces, resource dashboard/exports, health endpoints,
-or profiling listener.
+**Status:** T02/T03 implement structured Ara/MCP instrumentation and local process
+sampling for the stdio adapter. Export endpoints, HTTP health/metrics serving,
+resource dashboard/exports, and profiling remain planned.
 
 These requirements apply to both stdio and Streamable HTTP. They observe the
 adapter and its interaction with Ara; Ara remains authoritative for imaging and

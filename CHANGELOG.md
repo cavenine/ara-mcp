@@ -7,6 +7,8 @@ and dated headings. No release has been published.
 
 ### Added
 
+- Runnable Cobra/Viper CLI and official MCP Go SDK v1.8.0 stdio server with read-only
+  Ara context/sequence tools, structured tool signals, and paced process diagnostics.
 - Resty-backed Ara HTTP gateway with bounded request/response handling, explicit
   accepted/unknown mutation outcomes, GET-only retries, and OpenTelemetry signals.
 - Go 1.27.x module and initial project documentation.
