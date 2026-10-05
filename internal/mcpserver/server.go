@@ -1,7 +1,7 @@
 // Copyright (c) 2026 OpenAstro Contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package mcpserver registers Ara read tools on the official MCP SDK server.
+// Package mcpserver registers Ara tools on the official MCP SDK server.
 package mcpserver
 
 import (
@@ -31,6 +31,7 @@ import (
 // Options configures the shared MCP tool server.
 type Options struct {
 	Ara       *ara.Client
+	Control   *ControlManager
 	Version   string
 	Logger    *slog.Logger
 	Meter     metric.Meter
@@ -122,7 +123,31 @@ func New(options Options) (*mcp.Server, error) {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (AdapterDiagnostics, error) {
 		return getAdapterDiagnostics(ctx, options, health)
 	})
+	if options.Control != nil {
+		addTool(server, instrumentation, &mcp.Tool{
+			Name:        "begin_control",
+			Description: "Begin this adapter's control phase for a configured Ara rig.",
+			Annotations: &mcp.ToolAnnotations{OpenWorldHint: new(false)},
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (BeginControlResult, error) {
+			return options.Control.Begin(ctx, requestID(ctx))
+		})
+		addTool(server, instrumentation, &mcp.Tool{
+			Name:        "end_control",
+			Description: "Release this adapter's control phase without stopping Ara work.",
+			Annotations: &mcp.ToolAnnotations{OpenWorldHint: new(false)},
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, input EndControlInput) (ControlStatus, error) {
+			if err := options.Control.End(ctx, input.ControlID, requestID(ctx)); err != nil {
+				return ControlStatus{}, err
+			}
+			return options.Control.Snapshot(), nil
+		})
+	}
 	return server, nil
+}
+
+// EndControlInput identifies the current local control phase.
+type EndControlInput struct {
+	ControlID string `json:"control_id" jsonschema:"Control ID returned by begin_control"`
 }
 
 type requestIDKey struct{}
@@ -194,6 +219,7 @@ func newMetrics(meter metric.Meter) (toolMetrics, error) {
 
 func addTool[In, Out any](server *mcp.Server, instrumentation toolInstrumentation, tool *mcp.Tool, handler func(context.Context, *mcp.CallToolRequest, In) (Out, error)) {
 	toolName := tool.Name
+	readOnly := tool.Annotations != nil && tool.Annotations.ReadOnlyHint
 	mcp.AddTool(server, tool, func(ctx context.Context, request *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
 		requestID, err := newRequestID()
 		if err != nil {
@@ -213,12 +239,16 @@ func addTool[In, Out any](server *mcp.Server, instrumentation toolInstrumentatio
 		var callErr error
 		func() {
 			defer instrumentation.metrics.inflight.Add(ctx, -1, attrs)
-			select {
-			case instrumentation.reads <- struct{}{}:
-				defer func() { <-instrumentation.reads }()
+			if readOnly {
+				select {
+				case instrumentation.reads <- struct{}{}:
+					defer func() { <-instrumentation.reads }()
+					out, callErr = handler(ctx, request, input)
+				default:
+					callErr = errReadCapacity
+				}
+			} else {
 				out, callErr = handler(ctx, request, input)
-			default:
-				callErr = errReadCapacity
 			}
 		}()
 		outcome := "success"
@@ -241,6 +271,13 @@ func addTool[In, Out any](server *mcp.Server, instrumentation toolInstrumentatio
 		}
 		if callErr != nil {
 			fields = append(fields, "error_class", toolErrorClass(callErr))
+			if mutationErr, ok := errors.AsType[*MutationDispatchError](callErr); ok {
+				fields = append(fields, "mutation_outcome", mutationErr.Receipt.Outcome,
+					"retry_safe", mutationErr.Receipt.RetrySafe, "intent_replayed", mutationErr.Receipt.Replayed)
+			} else if replayErr, ok := errors.AsType[*MutationReplayError](callErr); ok {
+				fields = append(fields, "mutation_outcome", replayErr.Receipt.Outcome,
+					"retry_safe", replayErr.Receipt.RetrySafe, "intent_replayed", true)
+			}
 		}
 		instrumentation.logger.Log(ctx, level, "tool call completed", fields...)
 		span.End()
@@ -260,8 +297,36 @@ func newRequestID() (string, error) {
 }
 
 func toolErrorClass(err error) string {
+	if _, ok := errors.AsType[ControlClaimError](err); ok {
+		return "uncertain"
+	}
+	if mutationErr, ok := errors.AsType[*MutationDispatchError](err); ok {
+		return boundedMutationErrorClass(mutationErr.Receipt.ErrorClass)
+	}
+	var replay *MutationReplayError
+	if errors.As(err, &replay) {
+		return boundedMutationErrorClass(replay.ErrorClass)
+	}
 	if errors.Is(err, errReadCapacity) {
 		return "capacity"
+	}
+	if errors.Is(err, errControlBusy) || errors.Is(err, errMutationBusy) {
+		return "busy"
+	}
+	if errors.Is(err, errIntentCapacity) {
+		return "capacity"
+	}
+	if errors.Is(err, errIntentConflict) {
+		return "intent_conflict"
+	}
+	if errors.Is(err, errRunActive) {
+		return "run_active"
+	}
+	if errors.Is(err, errStaleRunID) {
+		return "stale_run_id"
+	}
+	if errors.Is(err, errRunStateUnknown) {
+		return "run_state_unknown"
 	}
 	if errors.Is(err, errInvalidArgument) {
 		return "invalid_argument"
@@ -543,5 +608,11 @@ func getAdapterDiagnostics(ctx context.Context, options Options, health *araHeal
 	}
 	result.AraReachable = reachable
 	result.LastSuccessfulAraCheck = lastSuccessful
+	if options.Control != nil {
+		control := options.Control.Snapshot()
+		result.WebSocketState = control.WebSocketState
+		result.LastHeartbeat = control.LastHeartbeat
+		result.ControlOwnership = control.ControlOwnership
+	}
 	return result, nil
 }

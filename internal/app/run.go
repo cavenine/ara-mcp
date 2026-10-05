@@ -52,8 +52,16 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("create process sampler: %w", err)
 	}
+	control, err := mcpserver.NewControlManager(
+		client, logger, version, config.Transport,
+		meterProvider.Meter("github.com/cavenine/ara-mcp/internal/mcpserver/control"),
+		tracerProvider.Tracer("github.com/cavenine/ara-mcp/internal/mcpserver/control"),
+	)
+	if err != nil {
+		return fmt.Errorf("create control manager: %w", err)
+	}
 	server, err := mcpserver.New(mcpserver.Options{
-		Ara: client, Version: version, Transport: "stdio", Logger: logger,
+		Ara: client, Control: control, Version: version, Transport: "stdio", Logger: logger,
 		Meter:   meterProvider.Meter("github.com/cavenine/ara-mcp/internal/mcpserver"),
 		Tracer:  tracerProvider.Tracer("github.com/cavenine/ara-mcp/internal/mcpserver"),
 		Sampler: sampler, StartedAt: time.Now(),
@@ -104,6 +112,9 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 	}
 	runErr := server.Run(runCtx, &mcp.StdioTransport{})
 	stop()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	runErr = errors.Join(runErr, control.Close(shutdownCtx, ""))
+	shutdownCancel()
 	if diagnosticsListener != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := diagnosticsServer.Shutdown(shutdownCtx); err != nil {

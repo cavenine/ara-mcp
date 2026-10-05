@@ -46,6 +46,7 @@ var (
 
 type httpGateway struct {
 	client           *resty.Client
+	baseURL          string
 	timeout          time.Duration
 	maxResponseBytes int
 	readRetries      int
@@ -126,6 +127,7 @@ func newHTTPGateway(config Config) (*httpGateway, error) {
 		SetRedirectPolicy(resty.NoRedirectPolicy())
 	return &httpGateway{
 		client:           client,
+		baseURL:          baseURL,
 		timeout:          config.Timeout,
 		maxResponseBytes: int(config.MaxResponseBytes),
 		readRetries:      config.ReadRetries,

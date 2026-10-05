@@ -112,7 +112,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T02 | [Ara HTTP client](#t02-ara-http-client) | Complete — merged in [PR #2](https://github.com/cavenine/ara-mcp/pull/2), commit `14c30de`; `go test -race -shuffle=on -count=1 ./...`, `go vet ./...`, `go build ./...`, `go mod tidy -diff`, `go mod verify`, formatting, and diff checks passed | T01 |
 | T03 | [Executable, stdio, and read-only tools](#t03-executable-stdio-and-read-only-tools) | Complete — process-level stdio smoke, five read-only tools, typed configuration, metrics/traces, and paced process diagnostics; repository checks and five platform cross-builds passed. Completion evidence below. | T02 |
 | T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Complete — Chi diagnostics listener, access policy, probes/status/metrics, and middleware behavior verified. | T03 |
-| T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | Pending | T03 |
+| T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | Complete — cooperative session tools, arbitration core, reconnect/restart invalidation, lifecycle signals, and local plus Ara-daemon verification are recorded below; O2 global run discovery remains an explicit upstream limit | T03 |
 | T05 | [Sequence authoring](#t05-sequence-authoring) | Pending | T04 |
 | T06 | [Sequence execution](#t06-sequence-execution) | Pending | T05 |
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Pending | T04, T06 |
@@ -352,6 +352,53 @@ read-only monitoring/reconnects do not signal attention via unbound WS, that con
 IDs expire correctly, and that overload cannot prevent supported stop/abort dispatch.
 Connection metrics and diagnostic state distinguish denied ownership, a broken
 WebSocket, and a healthy read-only adapter.
+
+**Completion evidence (2026-10-05):** stdio `begin_control`/`end_control` require an
+active Ara profile, preserve a private session capability, bind only the owned
+session WebSocket, send the current resume cursor, answer heartbeat pings, reject
+takeover requests, and release the slot on end/shutdown without stopping an Ara run.
+Recovery checks server UUID/version/build, profile, `/server/session` liveness, resume
+cursor, and the bounded sequence page; it reclaims only the same still-live session.
+Expiry, rejection, profile change, or daemon restart invalidates the local ID and
+requires another explicit begin. Session and run-state reconciliation are read-only;
+no sequence or equipment mutation tool is added in T04.
+
+The mutation dispatcher requires the active `control_id`, serializes the normal lane,
+retains a separate reserved-interrupt lane, requires fresh Ara preflight for
+manual/start/run-control actions, and checks `expected_run_id`. Its SHA-256 intent
+ledger is bounded to 1,024 intents/1 MiB, stores no request/result bodies, replays
+matching outcome metadata, rejects argument conflicts, and rejects normal overflow.
+At capacity, stop/abort-class interrupts remain dispatchable without a receipt. Ara
+O2 provides no complete global active-run scan; callers must fail closed when their
+fresh evidence cannot establish the required run scope. No cross-client REST
+ownership or global one-run guarantee is claimed; T05–T07 must route mutation tools
+through this dispatcher.
+
+Focused RED/GREEN covered `TestConnectWithRequestIDClaimsAraControlSession`,
+`TestDisconnectWithRequestIDReleasesAraControlSession`,
+`TestOpenControlWebSocketBindsSessionAndNegotiatesProtocol`,
+`TestResumeControlWebSocketSendsLastSeenCursor`,
+`TestMaintainControlWebSocketAnswersAraHeartbeatAndRejectsTakeover`,
+`TestControlManager_BeginRequiresConfiguredProfile`,
+`TestControlManager_DispatchMutationReplaysIntentAndRejectsArgumentConflict`,
+`TestControlManager_DispatchMutationSeparatesInterruptLaneAndGuardsRunState`, and
+`TestControlManager_DispatchChecksAraIdentityBeforeMutation`. Each was run red for
+the missing behavior, then passed after implementation. Additional green tests cover
+capacity overflow with interrupt availability, ambiguous claim handling, reconnect
+with the same ID, restart/expiry invalidation without re-claim, shutdown cleanup,
+diagnostic state, tool discovery/calls, metrics, trace linkage, and session-secret
+redaction. Full checks passed: formatting, module tidy/verification, vet, shuffled
+race tests, build, and Linux amd64/arm64, Darwin amd64/arm64, and Windows amd64
+cross-builds.
+
+Live Ara check (2026-10-05): through an SSH tunnel to the RPi4 daemon at
+`34b59e6de1d5ab0d5afe51ddb6a4206e935e3f4c` (Ara 1.0.0.0, .NET 10.0.12, Debian 13
+arm64), the integration test claimed and released a free session, bound WS protocol 1,
+resumed cursor `0`, received/responded to the daemon heartbeat, reclaimed the same
+session ID after a socket reconnect, and rejected a competing claim. The manager's
+active-profile check denied begin because this daemon had no active profile; the
+session remained disconnected afterward. No equipment endpoints or physical-device
+commands were used. Exact tagged test commands are recorded in `development.md`.
 
 ### T05 Sequence authoring
 

@@ -24,8 +24,9 @@ This guide owns setup and verification commands for ara-mcp. Read
 ## Current state
 
 T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, and T13's
-optional diagnostics HTTP listener are implemented. The current tools are
-read-only; HTTP MCP, mutations, and a release are not available yet.
+optional diagnostics HTTP listener are implemented, along with T04's explicit
+`begin_control`/`end_control` phase tools. These tools manage Ara's adapter session
+only; sequence/equipment mutations, HTTP MCP, and a release are not available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -160,6 +161,11 @@ An agent configuration uses its supported MCP config format. Generic server entr
 The process writes JSON logs to stderr and MCP frames to stdout only. Available
 tools are `get_server_context`, `get_rig_context`, `list_sequences`, `get_sequence`,
 and `get_adapter_diagnostics`. No named MCP host compatibility is claimed yet.
+
+The stdio tool set includes `begin_control` and `end_control` in addition to the
+read tools below. Begin requires an active Ara profile and binds the session WebSocket;
+ending or shutting down ara-mcp releases the slot without stopping Ara work. See the
+[T04 policy and remaining verification](first-release-policy.md#cooperative-control).
 
 The full [skill index](agent-instructions.md#public-go-skills) also routes type/
 generic safety and appropriate `lo`/`mo` use. Those helpers are selected for real
@@ -358,6 +364,24 @@ Ara reachability. This recipe uses read-only operations only. Record the daemon
 commit, OmniSim version, adapter commit, OS/architecture, and observations. The
 T01 simulator results are source evidence; this T03 MCP flow has not yet been run
 against the live daemon.
+
+### T04 Ara control-session check (opt-in)
+
+The integration-tagged Ara test exercises the real session claim, session-bound
+WebSocket/version and resume headers, server heartbeat/pong, same-session re-claim,
+takeover rejection, and release. It sends no equipment command. The test skips when
+Ara already reports a control owner; a fresh claim is an Ara user-activity event.
+For a remote daemon, forward its loopback listener over SSH:
+
+```sh
+ssh -N -L 15555:127.0.0.1:5555 user@ara-host
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraControlSessionAndHeartbeat$' ./internal/ara
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraBeginControlRequiresProfileWithoutClaimingSlot$' ./internal/mcpserver
+```
+
+The manager test only attempts begin when Ara reports no active profile and confirms
+the control slot remains free. Record Ara build/API identity, platform, adapter commit,
+and test result; do not infer physical-equipment behavior from these session checks.
 
 ## Agent-assisted development
 

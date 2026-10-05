@@ -23,8 +23,8 @@ the gateway owns HTTP execution, status/body decoding, bounded reads, retry poli
 and request instrumentation.
 Use Go's standard library for JSON and logging where it covers the requirement.
 Use Chi and its middleware for HTTP serving, and Chi render for ordinary HTTP
-payloads as described below. A WebSocket dependency can be selected when event
-integration is implemented.
+payloads as described below. T04 uses `github.com/coder/websocket` v1.8.12 for
+Ara's session-bound control socket; it is not an unbound monitoring connection.
 
 See the [implementation plan](plan.md) for delivery tasks and the
 [development guide](development.md) for setup and verification commands.
@@ -192,6 +192,15 @@ and [OpenAPI snapshot](https://github.com/open-astro/openastro-ara/blob/34b59e6d
   as user activity. Do not automatically reclaim an expired session.
 - **Retries:** use upstream idempotency support where actually implemented. A lost
   response to a mutation is an uncertain outcome; do not blindly repeat it.
+- **Control WebSocket:** the current Ara client binds `/api/v1/ws` with the
+  adapter-owned `X-Ara-Session` capability and `X-Ara-WS-Version: 1`. Ara's JSON
+  `ping` requires a JSON `pong` message (separate from RFC WebSocket control frames);
+  takeover requests are rejected to preserve the current control phase. On network
+  loss, the adapter re-reads server identity, profile, session liveness, resume cursor,
+  and the bounded sequence page before reclaiming the same session ID. A changed
+  daemon identity/build/profile or expired/rejected session invalidates the local
+  control ID; a new claim then requires an explicit tool call. General event handling
+  remains T08 work. Ara O2 still prevents a guaranteed global active-run scan.
 
 Evidence: [validator](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/SequenceSchemaValidator.cs),
 [executor](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/SequencerService.cs),

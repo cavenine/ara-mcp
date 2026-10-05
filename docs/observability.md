@@ -1,8 +1,10 @@
 # Logging and observability requirements
 
 **Status:** T02/T03 implement structured Ara/MCP instrumentation and local process
-sampling; T13 adds an optional Chi diagnostics listener with health/status and
-Prometheus metrics. Resource dashboard/exports and profiling remain planned.
+sampling; T04 implements control-phase logs, heartbeat/reconnect metrics, bounded
+mutation outcome instrumentation, and diagnostic connection state; T13 adds an
+optional Chi diagnostics listener with health/status and Prometheus metrics. Resource
+dashboard/exports and profiling remain planned.
 
 These requirements apply to both stdio and Streamable HTTP. They observe the
 adapter and its interaction with Ara; Ara remains authoritative for imaging and
@@ -155,6 +157,16 @@ are defined with the relevant implementation task and documented beside declarat
 | HTTP MCP requests | Normalized Chi route/method latency/status and transport faults; separate stream lifetime from tool latency and distinguish protocol success from tool errors | T09 |
 | Runtime/process usage | Shared process CPU/RSS, Go memory/GC, goroutines, uptime, and available process statistics with explicit units/freshness | T03, T12 |
 | Resource dashboard/history/exports | Sampling failures, retained window/bytes, live subscribers, export concurrency/failures, and slow-consumer handling | T12 |
+
+T04 records `ara.control.claims` (counter by `outcome`), `ara.control.owned` and
+`ara.websocket.active` (up/down counters), `ara.websocket.reconnects`,
+`ara.websocket.heartbeats`, `ara.control.mutations` (bounded `kind`, `outcome`, and
+`error.type`), and `ara.control.mutation.replays`. IDs and user text are never metric
+labels. `/status` and `get_adapter_diagnostics` expose ownership, socket state,
+last heartbeat, and last reconciliation; none include the Ara session capability.
+Short-lived `ara.control.begin`, `ara.control.end`, and `ara.control.reconnect` spans
+capture lifecycle work; reconnect spans link to the initiating begin span, and no
+span remains open for the lifetime of an imaging session.
 
 Choose histogram buckets that cover documented request timeouts. Tool-call latency
 measures adapter request handling, not the duration of an exposure or an imaging

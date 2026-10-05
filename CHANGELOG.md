@@ -7,6 +7,12 @@ and dated headings. No release has been published.
 
 ### Added
 
+- T04 `begin_control`/`end_control` stdio tools with an active-profile prerequisite,
+  adapter-owned Ara session WebSocket, heartbeat replies, takeover rejection,
+  same-session reconnect, restart/expiry invalidation, and best-effort session release
+  on shutdown. Add bounded intent receipts, normal and reserved-interrupt dispatch
+  lanes, run-state preflight checks, and control/connection metrics. Sequence/equipment
+  mutation tools remain unavailable until their owner tasks wire into the dispatcher.
 - Optional Chi diagnostics HTTP listener with liveness/readiness/status probes,
   Prometheus exposition, structured access/recovery logging, and loopback-default
   Basic-auth/TLS access policy.
