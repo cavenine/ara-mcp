@@ -74,9 +74,10 @@ optimizations; add only the caching/pooling/parallelism the measurements justify
 | Responsibility | Selected implementation |
 | --- | --- |
 | Outgoing Ara REST calls | Resty v2.17.2 in the private Ara HTTP gateway |
-| HTTP routing and composition | `github.com/go-chi/chi/v5` |
+| HTTP routing and composition | `github.com/go-chi/chi/v5` v5.3.2 |
 | Request IDs, recovery, and route-scoped middleware | Chi's `middleware` package |
-| Ordinary diagnostic/status/error payloads | `github.com/go-chi/render` with typed payloads |
+| Ordinary diagnostic/status/error payloads | `github.com/go-chi/render` v1.0.3 with typed payloads |
+| Prometheus diagnostics exposition | OpenTelemetry Prometheus exporter v0.69.0 with a private registry |
 | Resource dashboard | Locally served Datastar frontend, official Go SDK, and dedicated SSE stream |
 | Resource downloads | Bounded CSV/JSONL snapshots encoded with their native Go encoders |
 | MCP negotiation, JSON-RPC, and JSON/SSE framing | Official MCP Go SDK Streamable HTTP handler, mounted into Chi |
@@ -87,6 +88,12 @@ Chi render handles ordinary application payloads; it does not encode SDK MCP
 responses, dashboard SSE, CSV/JSONL exports, metrics, or pprof data. Middleware
 preserves streaming/flush behavior and distinguishes HTTP request lifetime from
 logical tool-call latency.
+
+T13's diagnostics listener is disabled by default and independent of MCP transport.
+It exposes read-only `/healthz`, `/readyz`, `/status`, and Prometheus `/metrics`
+routes, sharing T03's sampler and telemetry instruments. Loopback is the default
+access boundary. Remote binds require separate Basic-auth credentials and direct
+TLS certificate/key configuration; Ara control credentials are never reused.
 
 Chi's default request logger writes plain text to stdout. The selected integration
 uses its existing `LogFormatter`/`LogEntry` extension point for structured JSON

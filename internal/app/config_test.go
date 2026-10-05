@@ -76,3 +76,27 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 		t.Fatal("invalid log level was accepted")
 	}
 }
+
+func TestLoadConfigDiagnosticsAccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    string
+		wantError bool
+	}{
+		{name: "loopback listener", config: "diagnostics-listen: 127.0.0.1:9090\n"},
+		{name: "remote requires authentication and TLS", config: "diagnostics-listen: 0.0.0.0:9090\n", wantError: true},
+		{name: "remote with authentication and TLS", config: "diagnostics-listen: 0.0.0.0:9090\ndiagnostics-username: operator\ndiagnostics-password: secret\ndiagnostics-tls-cert: cert.pem\ndiagnostics-tls-key: key.pem\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(test.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadConfig(pflag.NewFlagSet("test", pflag.ContinueOnError), path)
+			if (err != nil) != test.wantError {
+				t.Fatalf("LoadConfig error = %v, wantError %t", err, test.wantError)
+			}
+		})
+	}
+}

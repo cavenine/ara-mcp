@@ -5,14 +5,18 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/cavenine/ara-mcp/internal/ara"
+	"github.com/cavenine/ara-mcp/internal/diagnostics"
 	"github.com/cavenine/ara-mcp/internal/mcpserver"
 	"github.com/cavenine/ara-mcp/internal/monitor"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -33,8 +37,16 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("create Ara client: %w", err)
 	}
-	reader := sdkmetric.NewManualReader()
-	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	var meterProvider *sdkmetric.MeterProvider
+	var metricsHandler http.Handler
+	if config.DiagnosticsListen != "" {
+		meterProvider, metricsHandler, err = diagnostics.NewMetrics()
+		if err != nil {
+			return err
+		}
+	} else {
+		meterProvider = sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
+	}
 	tracerProvider := sdktrace.NewTracerProvider()
 	sampler, err := monitor.NewSamplerWithMeter(meterProvider.Meter("github.com/cavenine/ara-mcp/internal/monitor"))
 	if err != nil {
@@ -49,8 +61,61 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("create MCP server: %w", err)
 	}
+	var diagnosticsServer *http.Server
+	var diagnosticsListener net.Listener
+	diagnosticsErrors := make(chan error, 1)
+	if config.DiagnosticsListen != "" {
+		if config.DiagnosticsTLSCert != "" {
+			if _, err := tls.LoadX509KeyPair(config.DiagnosticsTLSCert, config.DiagnosticsTLSKey); err != nil {
+				return fmt.Errorf("load diagnostics TLS certificate: %w", err)
+			}
+		}
+		handler, err := diagnostics.Handler(diagnostics.Access{
+			Listen: config.DiagnosticsListen, Username: config.DiagnosticsUsername, Password: config.DiagnosticsPassword,
+			TLSCert: config.DiagnosticsTLSCert, TLSKey: config.DiagnosticsTLSKey,
+		}, diagnostics.Runtime{Ara: client, Sampler: sampler, Logger: logger, Version: version, StartedAt: time.Now(), Metrics: metricsHandler})
+		if err != nil {
+			return fmt.Errorf("configure diagnostics HTTP: %w", err)
+		}
+		diagnosticsListener, err = net.Listen("tcp", config.DiagnosticsListen)
+		if err != nil {
+			return fmt.Errorf("listen for diagnostics HTTP: %w", err)
+		}
+		diagnosticsServer = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	}
 	logger.InfoContext(ctx, "adapter started", "service", "ara-mcp", "version", version, "component", "process", "event", "startup", "transport", "stdio")
-	runErr := server.Run(ctx, &mcp.StdioTransport{})
+	if diagnosticsListener != nil {
+		logger.InfoContext(ctx, "diagnostics HTTP listener started", "service", "ara-mcp", "version", version, "component", "diagnostics_http", "event", "startup", "address", diagnosticsListener.Addr().String())
+	}
+	runCtx, stop := context.WithCancel(ctx)
+	if diagnosticsServer != nil {
+		go func() {
+			var serveErr error
+			if config.DiagnosticsTLSCert != "" {
+				serveErr = diagnosticsServer.ServeTLS(diagnosticsListener, config.DiagnosticsTLSCert, config.DiagnosticsTLSKey)
+			} else {
+				serveErr = diagnosticsServer.Serve(diagnosticsListener)
+			}
+			if !errors.Is(serveErr, http.ErrServerClosed) {
+				diagnosticsErrors <- serveErr
+				stop()
+			}
+		}()
+	}
+	runErr := server.Run(runCtx, &mcp.StdioTransport{})
+	stop()
+	if diagnosticsListener != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := diagnosticsServer.Shutdown(shutdownCtx); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+		shutdownCancel()
+		select {
+		case err := <-diagnosticsErrors:
+			runErr = errors.Join(runErr, err)
+		default:
+		}
+	}
 	if errors.Is(runErr, context.Canceled) && ctx.Err() != nil {
 		runErr = nil
 	}

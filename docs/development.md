@@ -23,9 +23,9 @@ This guide owns setup and verification commands for ara-mcp. Read
 
 ## Current state
 
-T02's Resty-backed Ara HTTP client and T03's executable stdio MCP server are
-implemented. The current tools are read-only; HTTP MCP, mutations, and a release
-are not available yet.
+T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, and T13's
+optional diagnostics HTTP listener are implemented. The current tools are
+read-only; HTTP MCP, mutations, and a release are not available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -102,8 +102,18 @@ Environment variables use the `ARA_MCP` prefix. Supported settings:
 | Log level | `--log-level` | `ARA_MCP_LOG_LEVEL` | `info` |
 | Ara timeout | `--timeout` | `ARA_MCP_TIMEOUT` | `10s` |
 | GET retries | `--read-retries` | `ARA_MCP_READ_RETRIES` | `0` (maximum 2) |
+| Diagnostics listener | `--diagnostics-listen` | `ARA_MCP_DIAGNOSTICS_LISTEN` | disabled |
+| Diagnostics Basic-auth username/password | not exposed as CLI flags | `ARA_MCP_DIAGNOSTICS_USERNAME` / `ARA_MCP_DIAGNOSTICS_PASSWORD` | unset |
+| Diagnostics TLS certificate/key | `--diagnostics-tls-cert` / `--diagnostics-tls-key` | `ARA_MCP_DIAGNOSTICS_TLS_CERT` / `ARA_MCP_DIAGNOSTICS_TLS_KEY` | unset |
 
 HTTP is recognized as a transport setting but remains unavailable until T09.
+The optional diagnostics listener is independent of the MCP transport and starts
+alongside stdio when configured. Bind it to loopback for local access. Non-loopback
+addresses require Basic-auth credentials and a valid TLS certificate/key pair;
+diagnostics credentials are separate from MCP credentials. Endpoints are
+`/healthz` (process liveness), `/readyz` (Ara API reachability), `/status` (adapter
+and sampler state), and `/metrics` (Prometheus exposition). TLS is terminated by
+ara-mcp for configured certificates; do not expose plaintext diagnostics remotely.
 Explicitly selected config files must exist and parse; no file is required. YAML:
 
 ```yaml
@@ -112,6 +122,7 @@ transport: stdio
 log-level: info
 timeout: 10s
 read-retries: 0
+diagnostics-listen: 127.0.0.1:9090
 ```
 
 Resolve keys once into a typed, validated configuration before constructing the
@@ -156,9 +167,9 @@ transformations or absence/result models, with Ara wire behavior preserved by te
 
 ## HTTP routing and middleware
 
-HTTP serving uses **Chi v5**, Chi's middleware, and **go-chi/render**. T13 introduces
-the basic diagnostics router; T09 adds HTTP MCP and T12 adds Datastar/dashboard
-streams and exports. No HTTP listener is implemented today.
+HTTP serving uses **Chi v5**, Chi's middleware, and **go-chi/render**. T13 implements
+the diagnostics router; T09 adds HTTP MCP and T12 adds Datastar/dashboard streams
+and exports.
 The [architecture](architecture.md#http-stack) records the framework/protocol boundary,
 and the [HTTP rules](../.agents/rules/ara-mcp.md#http-routing-and-middleware) own composition.
 
@@ -298,7 +309,7 @@ cross-build results, and physical-rig results distinct.
 [observability.md](observability.md) owns the required log schema, metrics, traces,
 health behavior, and diagnostic access model. T03 implements stderr JSON logs,
 tool-call metrics/traces, Ara request correlation, and local process diagnostics for
-stdio. OTLP/Prometheus export and HTTP diagnostics serving remain later tasks.
+stdio. T13 adds optional Prometheus exposition and HTTP diagnostic probes.
 The [resource dashboard contract](resource-dashboard.md) covers the self-hosted
 SSE/HTML page, bounded history, and CSV/JSONL exports (T12).
 
@@ -316,9 +327,10 @@ smoke check showing automatic updates with locally served assets and no external
 network dependency. T10 measures overhead rather than relying on flaky RSS assertions.
 
 Live checks must show how to retrieve stderr/journald logs and distinguish an
-adapter fault from an Ara operation failure. No diagnostics HTTP listener, scrape
-endpoint, OTLP exporter, or profiling listener is implemented yet. Do not require a
-remote collector for normal tests or to start a local stdio adapter.
+adapter fault from an Ara operation failure. T13's diagnostics listener and
+Prometheus scrape endpoint are optional and disabled by default; OTLP exporting and
+profiling remain unimplemented. Do not require a remote collector for normal tests
+or to start a local stdio adapter.
 
 Add a reproducible opt-in integration recipe against an actual Ara daemon with
 simulated equipment as the client/control/authoring tasks land, not only after

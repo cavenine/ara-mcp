@@ -1,6 +1,6 @@
 # ara-mcp implementation plan
 
-**Status:** T00–T03 are complete. This plan tracks delivery status and acceptance
+**Status:** T00–T03 and T13 are complete. This plan tracks delivery status and acceptance
 evidence; it is not itself an implemented capability list.
 No release version or date is assigned.
 
@@ -111,7 +111,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T01 | [Ara compatibility and tool contracts](#t01-ara-compatibility-and-tool-contracts) | Complete for master `6374eede`; first Ara release remains gated by O1; no named MCP host is claimed | T00 |
 | T02 | [Ara HTTP client](#t02-ara-http-client) | Complete — merged in [PR #2](https://github.com/cavenine/ara-mcp/pull/2), commit `14c30de`; `go test -race -shuffle=on -count=1 ./...`, `go vet ./...`, `go build ./...`, `go mod tidy -diff`, `go mod verify`, formatting, and diff checks passed | T01 |
 | T03 | [Executable, stdio, and read-only tools](#t03-executable-stdio-and-read-only-tools) | Complete — process-level stdio smoke, five read-only tools, typed configuration, metrics/traces, and paced process diagnostics; repository checks and five platform cross-builds passed. Completion evidence below. | T02 |
-| T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Pending | T03 |
+| T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Complete — Chi diagnostics listener, access policy, probes/status/metrics, and middleware behavior verified. | T03 |
 | T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | Pending | T03 |
 | T05 | [Sequence authoring](#t05-sequence-authoring) | Pending | T04 |
 | T06 | [Sequence execution](#t06-sequence-execution) | Pending | T05 |
@@ -300,6 +300,19 @@ health/status/metrics, and integration tests. No equipment tool dependency is ne
 stdout; valid configuration starts them while Ara is down. Probes/readers make no
 mutations, structured logs/access work, and stream-capable response writers survive
 the middleware chain. T12 and T09 extend this tested foundation.
+
+**Completion evidence (2026-10-05):** `go test -count=1 -run
+'^TestLoadConfigDiagnosticsAccess$' ./internal/app` failed first for a remote
+listener without authentication/TLS and passed after configuration validation was
+added. Router tests cover Basic-auth denial/allow, trusted request IDs, live/degraded
+readiness, status, Prometheus exposition, sanitized recovery logging, and flushing
+through Chi's request logger. A further RED/GREEN test showed `/readyz` and `/status`
+each made an upstream request (three for three probes), then verified one shared
+cached Ara health check for repeated probes. Final repository checks: `gofmt -l .`,
+`go mod tidy -diff`, `go mod verify`, `go vet ./...`,
+`go test -race -shuffle=on -count=1 ./...`, `go build ./...`, and cross-builds for
+Linux amd64/arm64, Darwin amd64/arm64, and Windows amd64. No live Ara diagnostics
+listener was tested; hardware/network deployment validation remains T10 work.
 
 ### T04 Ara control ownership and connection lifecycle
 

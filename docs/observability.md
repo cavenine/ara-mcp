@@ -1,8 +1,8 @@
 # Logging and observability requirements
 
 **Status:** T02/T03 implement structured Ara/MCP instrumentation and local process
-sampling for the stdio adapter. Export endpoints, HTTP health/metrics serving,
-resource dashboard/exports, and profiling remain planned.
+sampling; T13 adds an optional Chi diagnostics listener with health/status and
+Prometheus metrics. Resource dashboard/exports and profiling remain planned.
 
 These requirements apply to both stdio and Streamable HTTP. They observe the
 adapter and its interaction with Ara; Ara remains authoritative for imaging and
@@ -224,8 +224,9 @@ choices, not prerequisites for default tests or local-agent use.
 
 [resource-dashboard.md](resource-dashboard.md) owns the required sampling schema,
 self-hosted live page, SSE behavior, retained history, and CSV/JSONL exports.
-T03 collects the shared process/runtime samples; T12 delivers the diagnostics UI
-and downloadable finite histories on T13's early diagnostics listener, including
+T03 collects the shared process/runtime samples; T13 serves diagnostic health and
+metrics; T12 delivers the diagnostics UI and downloadable finite histories on that
+listener, including
 the opt-in rotating JSONL archive. T10 validates footprint and deployment behavior.
 The page works without a hosted monitoring service or required external assets.
 
