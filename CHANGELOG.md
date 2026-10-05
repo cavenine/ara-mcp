@@ -14,6 +14,13 @@ and dated headings. No release has been published.
   interrupt capacity for stop actions, and return acceptance separately from frame,
   job, and immediate device observations. Frame/job monitoring remains unavailable
   until T08.
+- T09 Streamable HTTP MCP endpoint at `/mcp` using the shared tool server, SDK
+  bearer authentication, Origin protection, TLS for non-loopback binds, structured
+  Chi request logging/recovery, HTTP metrics/traces, bounded requests, and graceful
+  service shutdown. Recovered faults after HTTP headers are committed are counted as
+  failures without appending a second MCP/SSE response. Concurrent session isolation
+  is verified with the official SDK v1.8.0 client; no named third-party host or target-
+  board compatibility claim is made.
 - T06 sequence execution tools: `get_sequence_state`, `start_sequence`,
   `pause_sequence`, `resume_sequence`, `stop_sequence`, and `abort_sequence`.
   Start checks the saved plan, Ara validation, palette, selected profile, connected

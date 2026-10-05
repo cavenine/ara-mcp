@@ -6,7 +6,9 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 )
@@ -34,17 +36,18 @@ func TestLoadConfigPrecedenceAndExplicitZero(t *testing.T) {
 
 func TestLoadConfigEnvironmentFileAndDefaults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("ara-url: http://file.example\ntransport: http\nlog-level: warn\ntimeout: 5s\nread-retries: 1\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("ara-url: http://file.example\ntransport: http\nhttp-bearer-token: 0123456789abcdef0123456789abcdef\nlog-level: warn\ntimeout: 5s\nread-retries: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("ARA_MCP_ARA_URL", "http://env.example")
 	t.Setenv("ARA_MCP_LOG_LEVEL", "debug")
 	t.Setenv("ARA_MCP_READ_RETRIES", "2")
+	t.Setenv("ARA_MCP_HTTP_ORIGINS", "https://agent.example,https://other.example")
 	config, err := LoadConfig(pflag.NewFlagSet("test", pflag.ContinueOnError), path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.AraURL != "http://env.example" || config.Transport != "http" || config.LogLevel != "debug" || config.Timeout.String() != "5s" || config.ReadRetries != 2 {
+	if config.AraURL != "http://env.example" || config.Transport != "http" || config.HTTPBearerToken != "0123456789abcdef0123456789abcdef" || config.LogLevel != "debug" || config.Timeout.String() != "5s" || config.ReadRetries != 2 || !slices.Equal(config.HTTPOrigins, []string{"https://agent.example", "https://other.example"}) {
 		t.Fatalf("environment/file precedence = %+v", config)
 	}
 
@@ -74,6 +77,22 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 	}
 	if _, err := LoadConfig(flags, ""); err == nil {
 		t.Fatal("invalid log level was accepted")
+	}
+}
+
+func TestConfigRequiresAuthenticatedHTTPListener(t *testing.T) {
+	config := Config{AraURL: "http://127.0.0.1:5555", Transport: "http", LogLevel: "info", Timeout: 10 * time.Second}
+	if err := config.Validate(); err == nil {
+		t.Fatal("HTTP transport without listener or bearer token was accepted")
+	}
+	config.HTTPBearerToken = "0123456789abcdef0123456789abcdef"
+	config.HTTPListen = "0.0.0.0:8080"
+	if err := config.Validate(); err == nil {
+		t.Fatal("network-facing HTTP listener without TLS was accepted")
+	}
+	config.HTTPTLSCert, config.HTTPTLSKey = "cert.pem", "key.pem"
+	if err := config.Validate(); err != nil {
+		t.Fatalf("authenticated TLS listener rejected: %v", err)
 	}
 }
 
