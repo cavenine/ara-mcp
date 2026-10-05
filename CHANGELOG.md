@@ -7,6 +7,9 @@ and dated headings. No release has been published.
 
 ### Added
 
+- Optional Chi diagnostics HTTP listener with liveness/readiness/status probes,
+  Prometheus exposition, structured access/recovery logging, and loopback-default
+  Basic-auth/TLS access policy.
 - Runnable Cobra/Viper CLI and official MCP Go SDK v1.8.0 stdio server with read-only
   Ara context/sequence tools, structured tool signals, and paced process diagnostics.
 - Resty-backed Ara HTTP gateway with bounded request/response handling, explicit

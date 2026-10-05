@@ -9,17 +9,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cavenine/ara-mcp/internal/diagnostics"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
 // Config is the validated runtime configuration passed to the adapter.
 type Config struct {
-	AraURL      string        `mapstructure:"ara-url"`
-	Transport   string        `mapstructure:"transport"`
-	LogLevel    string        `mapstructure:"log-level"`
-	Timeout     time.Duration `mapstructure:"timeout"`
-	ReadRetries int           `mapstructure:"read-retries"`
+	AraURL              string        `mapstructure:"ara-url"`
+	Transport           string        `mapstructure:"transport"`
+	LogLevel            string        `mapstructure:"log-level"`
+	Timeout             time.Duration `mapstructure:"timeout"`
+	ReadRetries         int           `mapstructure:"read-retries"`
+	DiagnosticsListen   string        `mapstructure:"diagnostics-listen"`
+	DiagnosticsUsername string        `mapstructure:"diagnostics-username"`
+	DiagnosticsPassword string        `mapstructure:"diagnostics-password"`
+	DiagnosticsTLSCert  string        `mapstructure:"diagnostics-tls-cert"`
+	DiagnosticsTLSKey   string        `mapstructure:"diagnostics-tls-key"`
 }
 
 // LoadConfig resolves explicit flags, environment, optional file, and defaults.
@@ -28,7 +34,7 @@ func LoadConfig(flags *pflag.FlagSet, configFile string) (Config, error) {
 	v.SetEnvPrefix("ARA_MCP")
 	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	v.AutomaticEnv()
-	for _, key := range []string{"ara-url", "transport", "log-level", "timeout", "read-retries"} {
+	for _, key := range []string{"ara-url", "transport", "log-level", "timeout", "read-retries", "diagnostics-listen", "diagnostics-username", "diagnostics-password", "diagnostics-tls-cert", "diagnostics-tls-key"} {
 		if err := v.BindEnv(key); err != nil {
 			return Config{}, fmt.Errorf("bind %s environment variable: %w", key, err)
 		}
@@ -43,6 +49,7 @@ func LoadConfig(flags *pflag.FlagSet, configFile string) (Config, error) {
 	v.SetDefault("log-level", "info")
 	v.SetDefault("timeout", 10*time.Second)
 	v.SetDefault("read-retries", 0)
+	v.SetDefault("diagnostics-listen", "")
 	if configFile != "" {
 		v.SetConfigFile(configFile)
 		if err := v.ReadInConfig(); err != nil {
@@ -76,6 +83,9 @@ func (c Config) Validate() error {
 	}
 	if c.ReadRetries < 0 || c.ReadRetries > 2 {
 		return fmt.Errorf("read retries must be between 0 and 2")
+	}
+	if err := (diagnostics.Access{Listen: c.DiagnosticsListen, Username: c.DiagnosticsUsername, Password: c.DiagnosticsPassword, TLSCert: c.DiagnosticsTLSCert, TLSKey: c.DiagnosticsTLSKey}).Validate(); err != nil {
+		return err
 	}
 	return nil
 }

@@ -8,9 +8,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
+	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStdioProcessWritesOnlyMCPFramesToStdout(t *testing.T) {
@@ -19,7 +23,16 @@ func TestStdioProcessWritesOnlyMCPFramesToStdout(t *testing.T) {
 		t.Fatalf("build executable: %v\n%s", err, output)
 	}
 	initialize := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"stdio-smoke","version":"1"}}}` + "\n"
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnosticsAddress := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
 	command := exec.CommandContext(t.Context(), binary, "--ara-url", "http://127.0.0.1:1", "serve")
+	command.Env = append(os.Environ(), "ARA_MCP_DIAGNOSTICS_LISTEN="+diagnosticsAddress)
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +47,21 @@ func TestStdioProcessWritesOnlyMCPFramesToStdout(t *testing.T) {
 	}
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		response, requestErr := (&http.Client{Timeout: 100 * time.Millisecond}).Get("http://" + diagnosticsAddress + "/healthz")
+		if requestErr == nil {
+			_ = response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("diagnostics /healthz status = %d", response.StatusCode)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("diagnostics listener did not start: %v", requestErr)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := io.WriteString(stdin, initialize); err != nil {
 		t.Fatal(err)

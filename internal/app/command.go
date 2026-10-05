@@ -46,6 +46,9 @@ func NewCommand(options CommandOptions) *cobra.Command {
 	flags.String("log-level", "", "log level: debug, info, warn, or error")
 	flags.Duration("timeout", 0, "Ara request timeout")
 	flags.Int("read-retries", 0, "maximum retries for Ara GET requests")
+	flags.String("diagnostics-listen", "", "optional diagnostics HTTP listen address")
+	flags.String("diagnostics-tls-cert", "", "diagnostics TLS certificate file")
+	flags.String("diagnostics-tls-key", "", "diagnostics TLS private key file")
 
 	var config Config
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {

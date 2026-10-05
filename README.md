@@ -13,14 +13,15 @@ interface alongside Ara's human-facing client.
 
 ## Status
 
-**Implementation in progress.** T02's Resty-backed Ara HTTP client is complete.
-T03 adds a runnable stdio MCP server with read-only Ara tools and local adapter
-diagnostics. Streamable HTTP, mutations, and a release are not available yet.
+**Implementation in progress.** T02's Resty-backed Ara HTTP client, T03's stdio
+MCP server/read-only Ara tools, and T13's optional diagnostics HTTP listener are
+implemented. Streamable HTTP MCP, mutations, and a release are not available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
 context, saved sequence pages/details, and adapter/process diagnostics. No tool
 changes equipment or sequence state. Ara connectivity is needed only when calling
-Ara-backed tools; local diagnostics remain available when Ara is offline.
+Ara-backed tools; process diagnostics remain available when Ara is offline. Optional
+HTTP diagnostics expose `/healthz`, `/readyz`, `/status`, and `/metrics` separately.
 
 ## Architecture
 
