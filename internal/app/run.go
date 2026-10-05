@@ -52,7 +52,14 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("create process sampler: %w", err)
 	}
-	control := mcpserver.NewControlManager(client, logger, version, config.Transport)
+	control, err := mcpserver.NewControlManager(
+		client, logger, version, config.Transport,
+		meterProvider.Meter("github.com/cavenine/ara-mcp/internal/mcpserver/control"),
+		tracerProvider.Tracer("github.com/cavenine/ara-mcp/internal/mcpserver/control"),
+	)
+	if err != nil {
+		return fmt.Errorf("create control manager: %w", err)
+	}
 	server, err := mcpserver.New(mcpserver.Options{
 		Ara: client, Control: control, Version: version, Transport: "stdio", Logger: logger,
 		Meter:   meterProvider.Meter("github.com/cavenine/ara-mcp/internal/mcpserver"),

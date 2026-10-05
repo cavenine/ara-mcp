@@ -560,6 +560,41 @@ func TestOpenControlWebSocketDoesNotForwardSessionOnRedirect(t *testing.T) {
 	}
 }
 
+func TestResumeControlWebSocketSendsLastSeenCursor(t *testing.T) {
+	resumeFrame := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		_, payload, err := conn.Read(context.Background())
+		if err != nil {
+			t.Errorf("read resume frame: %v", err)
+			return
+		}
+		resumeFrame <- string(payload)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "b15e5138-12f0-4c41-8a43-ed79ef527e12"
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	if err := client.ResumeControlWebSocket(t.Context(), conn, "42"); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resumeFrame; got != `{"resume_token":"42"}` {
+		t.Fatalf("resume frame = %s, want token 42", got)
+	}
+}
+
 func TestMaintainControlWebSocketAnswersAraHeartbeatAndRejectsTakeover(t *testing.T) {
 	responses := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -94,6 +94,12 @@ and [SBC validation](docs/development.md#small-sbc-validation).
   and bind its session WebSocket before returning a local `control_id`.
 - `end_control`: release the adapter's Ara session and invalidate that `control_id`;
   Ara runs continue. Process shutdown releases a held session best-effort.
+- A transient WebSocket drop reclaims the same session after checking Ara's identity
+  and liveness. Expiry or a server restart invalidates control and requires a new
+  explicit `begin_control` call.
+- Mutations built on this phase must use the serialized normal lane and bounded
+  intent receipt ledger; lifecycle preflights fail closed on unknown run state. A
+  reserved interrupt lane remains available when normal admission is saturated.
 
 No sequence or equipment mutation tools are available yet. See [T04](docs/plan.md#t04-ara-control-ownership-and-connection-lifecycle)
 for outstanding arbitration and recovery work.

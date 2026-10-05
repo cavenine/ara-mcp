@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +18,14 @@ import (
 )
 
 const araWebSocketVersion = "1"
+
+// WebSocketHandshakeError contains only the HTTP status, never the server body
+// or session capability.
+type WebSocketHandshakeError struct{ StatusCode int }
+
+func (e *WebSocketHandshakeError) Error() string {
+	return fmt.Sprintf("ara websocket: handshake failed with http status %d", e.StatusCode)
+}
 
 // OpenControlWebSocket binds Ara's event socket to this adapter-owned session.
 // The caller owns the returned connection and must close it when the control
@@ -32,27 +41,54 @@ func (c *Client) OpenControlWebSocket(ctx context.Context, session ControlSessio
 	if err != nil {
 		return nil, err
 	}
-	dialContext, cancel := context.WithTimeout(ctx, c.gateway.timeout)
-	defer cancel()
+	dialer := &net.Dialer{Timeout: c.gateway.timeout}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		TLSHandshakeTimeout:   c.gateway.timeout,
+		ResponseHeaderTimeout: c.gateway.timeout,
+	}
+	defer transport.CloseIdleConnections()
 	header := make(http.Header)
 	header.Set("X-Ara-Session", session.sessionID)
 	header.Set("X-Ara-WS-Version", araWebSocketVersion)
-	connection, response, err := websocket.Dial(dialContext, endpoint, &websocket.DialOptions{
+	connection, response, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{
 		HTTPHeader: header,
-		HTTPClient: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		}},
+		HTTPClient: &http.Client{
+			Transport: transport,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	})
 	if err == nil {
 		return connection, nil
 	}
-	if dialContext.Err() != nil {
-		return nil, dialContext.Err()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	if response != nil {
-		return nil, fmt.Errorf("ara websocket: handshake failed with http status %d", response.StatusCode)
+		return nil, &WebSocketHandshakeError{StatusCode: response.StatusCode}
 	}
 	return nil, errors.New("ara websocket: dial failed")
+}
+
+// ResumeControlWebSocket sends Ara's resume cursor as the optional first text
+// frame. An empty token explicitly requests a fresh event subscription.
+func (c *Client) ResumeControlWebSocket(ctx context.Context, conn *websocket.Conn, token string) error {
+	if ctx == nil || conn == nil || len(token) > 128 || (token != "" && !validHeaderValue(token, 128)) {
+		return errors.New("ara websocket: invalid resume request")
+	}
+	frame, err := json.Marshal(struct {
+		ResumeToken string `json:"resume_token"`
+	}{ResumeToken: token})
+	if err != nil {
+		return fmt.Errorf("ara websocket: encode resume request: %w", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
+		return errors.New("ara websocket: resume request failed")
+	}
+	return nil
 }
 
 // MaintainControlWebSocket reads one session-bound socket, answers Ara's

@@ -365,6 +365,24 @@ commit, OmniSim version, adapter commit, OS/architecture, and observations. The
 T01 simulator results are source evidence; this T03 MCP flow has not yet been run
 against the live daemon.
 
+### T04 Ara control-session check (opt-in)
+
+The integration-tagged Ara test exercises the real session claim, session-bound
+WebSocket/version and resume headers, server heartbeat/pong, same-session re-claim,
+takeover rejection, and release. It sends no equipment command. The test skips when
+Ara already reports a control owner; a fresh claim is an Ara user-activity event.
+For a remote daemon, forward its loopback listener over SSH:
+
+```sh
+ssh -N -L 15555:127.0.0.1:5555 user@ara-host
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraControlSessionAndHeartbeat$' ./internal/ara
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraBeginControlRequiresProfileWithoutClaimingSlot$' ./internal/mcpserver
+```
+
+The manager test only attempts begin when Ara reports no active profile and confirms
+the control slot remains free. Record Ara build/API identity, platform, adapter commit,
+and test result; do not infer physical-equipment behavior from these session checks.
+
 ## Agent-assisted development
 
 Start with [agent-instructions.md](agent-instructions.md) to select rules and skills.

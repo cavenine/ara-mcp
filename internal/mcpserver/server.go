@@ -271,6 +271,13 @@ func addTool[In, Out any](server *mcp.Server, instrumentation toolInstrumentatio
 		}
 		if callErr != nil {
 			fields = append(fields, "error_class", toolErrorClass(callErr))
+			if mutationErr, ok := errors.AsType[*MutationDispatchError](callErr); ok {
+				fields = append(fields, "mutation_outcome", mutationErr.Receipt.Outcome,
+					"retry_safe", mutationErr.Receipt.RetrySafe, "intent_replayed", mutationErr.Receipt.Replayed)
+			} else if replayErr, ok := errors.AsType[*MutationReplayError](callErr); ok {
+				fields = append(fields, "mutation_outcome", replayErr.Receipt.Outcome,
+					"retry_safe", replayErr.Receipt.RetrySafe, "intent_replayed", true)
+			}
 		}
 		instrumentation.logger.Log(ctx, level, "tool call completed", fields...)
 		span.End()
@@ -290,8 +297,36 @@ func newRequestID() (string, error) {
 }
 
 func toolErrorClass(err error) string {
+	if _, ok := errors.AsType[ControlClaimError](err); ok {
+		return "uncertain"
+	}
+	if mutationErr, ok := errors.AsType[*MutationDispatchError](err); ok {
+		return boundedMutationErrorClass(mutationErr.Receipt.ErrorClass)
+	}
+	var replay *MutationReplayError
+	if errors.As(err, &replay) {
+		return boundedMutationErrorClass(replay.ErrorClass)
+	}
 	if errors.Is(err, errReadCapacity) {
 		return "capacity"
+	}
+	if errors.Is(err, errControlBusy) || errors.Is(err, errMutationBusy) {
+		return "busy"
+	}
+	if errors.Is(err, errIntentCapacity) {
+		return "capacity"
+	}
+	if errors.Is(err, errIntentConflict) {
+		return "intent_conflict"
+	}
+	if errors.Is(err, errRunActive) {
+		return "run_active"
+	}
+	if errors.Is(err, errStaleRunID) {
+		return "stale_run_id"
+	}
+	if errors.Is(err, errRunStateUnknown) {
+		return "run_state_unknown"
 	}
 	if errors.Is(err, errInvalidArgument) {
 		return "invalid_argument"

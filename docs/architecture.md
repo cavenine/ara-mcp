@@ -195,8 +195,12 @@ and [OpenAPI snapshot](https://github.com/open-astro/openastro-ara/blob/34b59e6d
 - **Control WebSocket:** the current Ara client binds `/api/v1/ws` with the
   adapter-owned `X-Ara-Session` capability and `X-Ara-WS-Version: 1`. Ara's JSON
   `ping` requires a JSON `pong` message (separate from RFC WebSocket control frames);
-  takeover requests are rejected to preserve the current control phase. General
-  event delivery and reconnect/restart recovery remain T08/T04 work, respectively.
+  takeover requests are rejected to preserve the current control phase. On network
+  loss, the adapter re-reads server identity, profile, session liveness, resume cursor,
+  and the bounded sequence page before reclaiming the same session ID. A changed
+  daemon identity/build/profile or expired/rejected session invalidates the local
+  control ID; a new claim then requires an explicit tool call. General event handling
+  remains T08 work. Ara O2 still prevents a guaranteed global active-run scan.
 
 Evidence: [validator](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/SequenceSchemaValidator.cs),
 [executor](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/SequencerService.cs),
