@@ -27,6 +27,37 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
+func TestReadControlIdentityUsesActiveProfileListWhenServerStateOmitsID(t *testing.T) {
+	const profileID = "e1d64755-e2ae-46f1-aa43-c6e67419e1e9"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/server/info":
+			_, _ = io.WriteString(w, `{"server_uuid":"server-01","version":"1.0.0","api":"v1"}`)
+		case "/api/v1/server/versions":
+			_, _ = io.WriteString(w, `{"daemon_version":"1.0.0","daemon_git_sha":"build-01","api_surfaces":[{"name":"rest","version":"1.0.0"}]}`)
+		case "/api/v1/server/state":
+			_, _ = io.WriteString(w, `{"server_uuid":"server-01","current_profile_id":null,"ws_resume_token":"0"}`)
+		case "/api/v1/profiles":
+			_, _ = io.WriteString(w, `{"active_id":"`+profileID+`","profiles":[{"id":"`+profileID+`","name":"test"}]}`)
+		default:
+			t.Errorf("unexpected Ara request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := ara.New(ara.Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := readControlIdentity(t.Context(), client, "profile-request-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.profileID != profileID {
+		t.Fatalf("active profile ID = %q, want %q", identity.profileID, profileID)
+	}
+}
+
 func TestControlManager_BeginRequiresConfiguredProfile(t *testing.T) {
 	var mutations atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +68,8 @@ func TestControlManager_BeginRequiresConfiguredProfile(t *testing.T) {
 			_, _ = io.WriteString(w, `{"daemon_version":"1.0.0","daemon_git_sha":"build-01","api_surfaces":[{"name":"rest","version":"1.0.0"}]}`)
 		case "/api/v1/server/state":
 			_, _ = io.WriteString(w, `{"server_uuid":"server-01","current_profile_id":null,"ws_resume_token":"0"}`)
+		case "/api/v1/profiles":
+			_, _ = io.WriteString(w, `{"active_id":null,"profiles":[]}`)
 		default:
 			mutations.Add(1)
 			w.WriteHeader(http.StatusOK)
@@ -944,6 +977,39 @@ func TestControlManager_DispatchMutationSeparatesInterruptLaneAndGuardsRunState(
 	}
 	if got := guardedDispatches.Load(); got != 0 {
 		t.Fatalf("guarded dispatcher calls = %d, want 0", got)
+	}
+}
+
+func TestControlManager_RunAbortUsesReservedLaneAndExpectedRunID(t *testing.T) {
+	control := newMutationTestControl(t)
+	control.normal <- struct{}{}
+	dispatches := 0
+	request := MutationRequest{
+		ControlID: "control-01", IntentID: "abort-run-01", Operation: "abort_sequence",
+		Arguments: []byte("abort"), Kind: MutationInterrupt, ExpectedRunID: "run-01",
+		Preflight: func(context.Context) (RunSnapshot, error) {
+			return RunSnapshot{Known: true, ActiveRun: true, RunID: "run-01"}, nil
+		},
+	}
+	if _, err := control.DispatchMutation(t.Context(), request, func(context.Context) (MutationReceipt, error) {
+		dispatches++
+		return MutationReceipt{Outcome: ara.OutcomeAccepted}, nil
+	}); err != nil {
+		t.Fatalf("reserved run abort error = %v, want dispatch despite saturated normal lane", err)
+	}
+	if dispatches != 1 || len(control.normal) != 1 {
+		t.Fatalf("dispatches = %d, normal lane occupancy = %d; want one interrupt dispatch and normal lane unchanged", dispatches, len(control.normal))
+	}
+	request.IntentID = "abort-run-stale"
+	request.ExpectedRunID = "run-old"
+	if _, err := control.DispatchMutation(t.Context(), request, func(context.Context) (MutationReceipt, error) {
+		dispatches++
+		return MutationReceipt{Outcome: ara.OutcomeAccepted}, nil
+	}); !errors.Is(err, errStaleRunID) {
+		t.Fatalf("stale run abort error = %v, want stale run ID error", err)
+	}
+	if dispatches != 1 {
+		t.Fatalf("stale run abort dispatched; total dispatches = %d", dispatches)
 	}
 }
 

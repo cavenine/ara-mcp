@@ -89,6 +89,47 @@ or `body`, along with the sequence UUID and control/intent IDs. Ara returns a co
 when that sequence has an active run. On uncertain update outcomes, do not retry
 automatically; inspect the saved detail first.
 
+## Start and monitor a saved plan (T06)
+
+After the saved body has been reviewed, use the active `control_id` and a new
+`intent_id`:
+
+```json
+{
+  "control_id": "<from begin_control>",
+  "intent_id": "<stable ID for this start>",
+  "sequence_id": "<saved Ara sequence UUID>"
+}
+```
+
+`start_sequence` re-reads the saved plan, checks Ara structural validation and the
+adapter palette, requires an active profile and connected camera, then checks each
+exposure/gain/offset/binning value against the camera's current reported limits. A
+sequence using `SwitchFilter` also requires a connected wheel, an available physical
+slot, and a profile label matching the instruction's filter name and position.
+`ContinueOnError: true` makes `executable_supported` false and is refused by
+`create_sequence`, `update_sequence`, and `start_sequence`: the verified Ara build
+can emit `instruction_failed` and still finish the run as `completed`.
+
+Ara returns `accepted` while its sequencer runs asynchronously. The operation receipt
+is not a run ID or completion signal. Read `get_sequence_state` until Ara reports a
+terminal state; a missing state or uncertain start remains unknown, not completed.
+An ambiguous start response is not automatically retried. Reusing the same intent
+within the control phase replays the recorded outcome without another start.
+
+`pause_sequence`, `resume_sequence`, `stop_sequence`, and `abort_sequence` require the
+current `expected_run_id` from Ara state plus a fresh intent ID. Stop and abort are
+distinct Ara commands and use the reserved interrupt lane. Resume sends
+`recenter: false` and `refocus: false`, so it does not implicitly move the telescope
+or focuser. Ending control or disconnecting the MCP client does not stop an accepted
+Ara run.
+
+The opt-in `TestLiveAraSequenceStartAndStateWithPinnedOmniSim` integration check
+exercises save/start/complete, pause/resume/stop, a second start/abort, and cleanup
+against the loopback-only RPi4 simulator profile. Run it as documented in
+[development.md](development.md#testing-ara-integration). Its evidence is limited to
+the recorded Ara daemon build and simulated camera/filter wheel.
+
 ## Verified template and evidence
 
 The authoring example is Ara's pinned

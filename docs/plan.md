@@ -114,7 +114,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Complete — Chi diagnostics listener, access policy, probes/status/metrics, and middleware behavior verified. | T03 |
 | T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | Complete — cooperative session tools, arbitration core, reconnect/restart invalidation, lifecycle signals, and local plus Ara-daemon verification are recorded below; O2 global run discovery remains an explicit upstream limit | T03 |
 | T05 | [Sequence authoring](#t05-sequence-authoring) | Complete — authoring tools, adapter palette check, template/create/update round trips, conflict handling, recipe, and pinned LRGB evidence are recorded below | T04 |
-| T06 | [Sequence execution](#t06-sequence-execution) | Pending | T05 |
+| T06 | [Sequence execution](#t06-sequence-execution) | Complete — live Ara/OmniSim lifecycle and device preflight verified on the RPi4 build; current-master/release compatibility remains under O1 | T05 |
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Pending | T04, T06 |
 | T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Pending | T06, T07 |
 | T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Pending | T03, T04, T13 |
@@ -400,6 +400,12 @@ active-profile check denied begin because this daemon had no active profile; the
 session remained disconnected afterward. No equipment endpoints or physical-device
 commands were used. Exact tagged test commands are recorded in `development.md`.
 
+Live profile-selection check (2026-10-05): on the same RPi4 Ara build, the profile
+library reported an active profile while `/server/state.current_profile_id` remained
+null. `TestLiveAraBeginControlUsesProfileRepositorySelection` passed through the SSH
+tunnel using `/profiles.active_id`; it acquired and released the Ara control session
+without issuing equipment commands.
+
 ### T05 Sequence authoring
 
 **Status:** Complete (2026-10-05). Added template list/instantiation, structural
@@ -471,6 +477,45 @@ Final checks passed: `gofmt -l .`, `go mod tidy -diff`, `go mod verify`, `go vet
 cross-builds for Linux amd64/arm64, Darwin amd64/arm64, and Windows amd64.
 
 ### T06 Sequence execution
+
+**Status:** Complete (2026-10-05) for the tested Ara RPi4 development build. The
+current-master/release compatibility gate remains O1; no physical-rig claim is made.
+
+RPi4 test setup (2026-10-05): Ara `1.0.0.0`, commit
+`34b59e6de1d5ab0d5afe51ddb6a4206e935e3f4c`, Debian 13 ARM64; OmniSim `v0.4.0`,
+commit `012a5778b4335b17332b9bffd8f3a0c561c727d8`, pinned artifact SHA-256
+`a39950f525075d6aaaa40ec2c13bc8dcc765a0acfbd728799cce1a2addef9bc9`. The enabled
+`ara-mcp-omnisim.service` binds only to `127.0.0.1:32323`; Ara's existing
+AlpacaBridge listener on port 6800 was left unchanged. The active profile
+`ara-mcp-t06-omnisim` (`e1d64755-e2ae-46f1-aa43-c6e67419e1e9`) connects only the
+OmniSim camera and filter wheel, labels the six simulated filter slots, and writes
+captures under `/tmp/ara-mcp-t06-captures`. Ara reports the camera connected with
+800×600 capability, 0.001–3,600 second exposure range, gain/offset 0, and 1–4
+binning. The profile's six labels match the simulated wheel slots. This setup was
+used for the live execution check below; no telescope device was connected or moved.
+
+**Initial RED/GREEN evidence (2026-10-05):** the Ara execution-route contract test
+first failed to compile because the state/start/pause/resume/stop/abort client methods
+were absent, then passed after they were added. `TestGetSequenceStateReturnsAraObservation`
+and `TestStartSequencePreflightsAndReturnsAcceptedState` first failed with unknown
+MCP tools, then passed after registration. `TestStartSequenceReturnsUnknownWithoutRetryingAmbiguousResponse`
+first showed an ambiguous 500 as an unstructured tool error; it now returns a structured
+`unknown` receipt and state observation, and intent replay does not issue another start.
+Other retained contracts cover disconnected-camera/active-run/filter-slot/camera-limit
+preflight, `ContinueOnError` rejection, fresh expected-run-ID checks, the reserved
+stop/abort lane, cancellation after acceptance, and terminal-observation deduplication.
+The live RPi4 check first exposed Ara returning 415 for a bodyless resume; ara-mcp now
+sends the verified safe body `{\"recenter\":false,\"refocus\":false}`.
+
+Live T06 command:
+`ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15556 go test -tags=integration -count=1 -v -run '^TestLiveAraSequenceStartAndStateWithPinnedOmniSim$' ./internal/mcpserver`.
+It passed: a saved 0.1-second simulated light exposure reached `completed`; a second
+looped run reached `paused`, resumed, stopped, restarted, and aborted. The test deletes
+its saved sequences and releases control. No telescope motion or physical equipment
+was used. Final checks passed: `gofmt -l .`, `go mod tidy -diff`, `go mod verify`,
+`go vet ./...`, `go test -race -shuffle=on -count=1 ./...`,
+`env -u ARA_MCP_LIVE_ARA_URL go test -tags=integration ./...`, `go build ./...`, and
+`git diff --check`.
 
 **Goal:** control the lifecycle of a saved sequence while Ara owns execution.
 

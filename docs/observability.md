@@ -4,7 +4,8 @@
 sampling; T04 implements control-phase logs, heartbeat/reconnect metrics, bounded
 mutation outcome instrumentation, and diagnostic connection state; T05 adds saved-
 plan change logs with correlation/sequence IDs and no sequence bodies; T13 adds an
-optional Chi diagnostics listener with health/status and Prometheus metrics. Resource
+optional Chi diagnostics listener with health/status and Prometheus metrics. T06
+records distinct terminal run-state observations from explicit state reads. Resource
 dashboard/exports and profiling remain planned.
 
 These requirements apply to both stdio and Streamable HTTP. They observe the
@@ -168,6 +169,14 @@ last heartbeat, and last reconciliation; none include the Ara session capability
 Short-lived `ara.control.begin`, `ara.control.end`, and `ara.control.reconnect` spans
 capture lifecycle work; reconnect spans link to the initiating begin span, and no
 span remains open for the lifetime of an imaging session.
+
+T06 records `ara.sequence.runs.observed` when an explicit state read first observes
+a terminal `completed`, `stopped`, or `failed` state for a sequence/run ID pair.
+The metric labels only the bounded terminal state; IDs are used only in structured
+logs and the bounded in-process replay-deduplication set. Command acceptance remains
+in the T04 mutation outcome metric and is not counted as a terminal result. This
+initial delivery observes on tool reads/immediate post-command reads; it does not
+consume Ara events (T08 owns event observation).
 
 Choose histogram buckets that cover documented request timeouts. Tool-call latency
 measures adapter request handling, not the duration of an exposure or an imaging

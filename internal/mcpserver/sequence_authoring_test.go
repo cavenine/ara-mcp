@@ -295,6 +295,33 @@ func TestValidateSequenceDistinguishesStructuralValidityFromUnsupportedPalette(t
 	}
 }
 
+func TestValidateSequenceRejectsContinueOnErrorForExecution(t *testing.T) {
+	const body = `{"schemaVersion":"openastroara-sequence-v1","$type":"OpenAstroAra.Sequencer.Container.SequentialContainer, OpenAstroAra.Sequencer","Items":{"$values":[{"$type":"NINA.Sequencer.SequenceItem.Imaging.TakeExposure, NINA.Sequencer","ExposureTime":30,"ContinueOnError":true}]}}`
+	session, _ := newSequenceAuthoringTestSession(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sequences/validate" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"valid":true}`)
+	})
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
+		Name: "validate_sequence", Arguments: json.RawMessage(`{"body":` + body + `}`),
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("validate_sequence result = %#v, error = %v", result, err)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var validation SequenceValidation
+	if err := json.Unmarshal(encoded, &validation); err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Valid || validation.ExecutableSupported || !strings.Contains(validation.SupportReason, "ContinueOnError") {
+		t.Fatalf("validation = %+v, want structural validity and ContinueOnError execution rejection", validation)
+	}
+}
+
 func TestSupportedSequencePaletteAcceptsBoundedLRGBBlock(t *testing.T) {
 	body := jsontext.Value(`{"schemaVersion":"openastroara-sequence-v1","$type":"OpenAstroAra.Sequencer.Container.SequentialContainer, OpenAstroAra.Sequencer","Items":{"$values":[{"$type":"OpenAstroAra.Sequencer.Container.SequentialContainer, OpenAstroAra.Sequencer","Conditions":{"$values":[{"$type":"OpenAstroAra.Sequencer.Conditions.LoopCondition, OpenAstroAra.Sequencer","Iterations":30}]},"Items":{"$values":[{"$type":"OpenAstroAra.Sequencer.SequenceItem.FilterWheel.SwitchFilter, OpenAstroAra.Sequencer","Filter":{"_name":"L","_position":0}},{"$type":"NINA.Sequencer.SequenceItem.Imaging.TakeExposure, NINA.Sequencer","ExposureTime":120,"ImageType":"LIGHT","Binning":{"X":1,"Y":1}}]},"Triggers":{"$values":[]}}]}}`)
 	if err := validateSupportedSequenceBody(body); err != nil {

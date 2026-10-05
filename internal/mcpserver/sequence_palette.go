@@ -97,6 +97,15 @@ func inspectSequentialContainer(container map[string]jsontext.Value, multiplier,
 		if err != nil {
 			return fmt.Errorf("invalid sequence item: %w", err)
 		}
+		if value, exists := item["ContinueOnError"]; exists {
+			var continueOnError bool
+			if err := json.Unmarshal(value, &continueOnError); err != nil {
+				return errors.New("ContinueOnError must be a boolean")
+			}
+			if continueOnError {
+				return errors.New("ContinueOnError is unsupported because Ara can report a completed run after instruction_failed")
+			}
+		}
 		typeName, _ := sequenceString(item["$type"])
 		*planned += multiplier
 		if *planned > maxPlannedInstructions {

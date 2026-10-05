@@ -42,7 +42,7 @@ type Options struct {
 	StartedAt time.Time
 }
 
-// New constructs an MCP server exposing the initial read-only Ara tools.
+// New constructs the shared Ara MCP server and its optional control tools.
 func New(options Options) (*mcp.Server, error) {
 	if options.Ara == nil {
 		return nil, errors.New("Ara client is required")
@@ -71,6 +71,10 @@ func New(options Options) (*mcp.Server, error) {
 	instrumentation := toolInstrumentation{
 		version: version, transport: options.Transport, logger: options.Logger,
 		tracer: options.Tracer, metrics: metrics, reads: make(chan struct{}, 4),
+		observations: &sequenceObservationTracker{
+			seen: make(map[string]struct{}), terminal: metrics.terminalRuns,
+			logger: options.Logger, version: version, transport: options.Transport,
+		},
 	}
 	if options.Sampler == nil {
 		options.Sampler, err = monitor.NewSamplerWithMeter(options.Meter)
@@ -125,6 +129,7 @@ func New(options Options) (*mcp.Server, error) {
 		return getAdapterDiagnostics(ctx, options, health)
 	})
 	registerSequenceAuthoringTools(server, instrumentation, options.Ara)
+	registerSequenceExecutionTools(server, instrumentation, options.Ara, options.Control)
 	if options.Control != nil {
 		registerSequenceMutationTools(server, instrumentation, options.Ara, options.Control)
 		addTool(server, instrumentation, &mcp.Tool{
@@ -156,18 +161,20 @@ type EndControlInput struct {
 type requestIDKey struct{}
 
 type toolMetrics struct {
-	calls    metric.Int64Counter
-	duration metric.Float64Histogram
-	inflight metric.Int64UpDownCounter
+	calls        metric.Int64Counter
+	duration     metric.Float64Histogram
+	inflight     metric.Int64UpDownCounter
+	terminalRuns metric.Int64Counter
 }
 
 type toolInstrumentation struct {
-	version   string
-	transport string
-	logger    *slog.Logger
-	tracer    trace.Tracer
-	metrics   toolMetrics
-	reads     chan struct{}
+	version      string
+	transport    string
+	logger       *slog.Logger
+	tracer       trace.Tracer
+	metrics      toolMetrics
+	reads        chan struct{}
+	observations *sequenceObservationTracker
 }
 
 var errReadCapacity = errors.New("read tool capacity exhausted")
@@ -216,6 +223,9 @@ func newMetrics(meter metric.Meter) (toolMetrics, error) {
 	}
 	if result.inflight, err = meter.Int64UpDownCounter("mcp.tool.in_flight", metric.WithUnit("{call}"), metric.WithDescription("MCP tool calls currently executing")); err != nil {
 		return toolMetrics{}, fmt.Errorf("create MCP in-flight counter: %w", err)
+	}
+	if result.terminalRuns, err = meter.Int64Counter("ara.sequence.runs.observed", metric.WithUnit("{run}"), metric.WithDescription("Distinct Ara sequence runs observed in terminal states")); err != nil {
+		return toolMetrics{}, fmt.Errorf("create Ara observed terminal run counter: %w", err)
 	}
 	return result, nil
 }
@@ -330,6 +340,9 @@ func toolErrorClass(err error) string {
 	}
 	if errors.Is(err, errRunActive) {
 		return "run_active"
+	}
+	if errors.Is(err, errRunInactive) {
+		return "run_not_active"
 	}
 	if errors.Is(err, errStaleRunID) {
 		return "stale_run_id"
@@ -520,6 +533,13 @@ func getRigContext(ctx context.Context, client *ara.Client) (RigContext, error) 
 	}
 	if err := json.Unmarshal(stateBody, &state); err != nil {
 		return RigContext{}, fmt.Errorf("decode Ara server state: %w", err)
+	}
+	profileID, err := selectedProfileID(ctx, client, state.CurrentProfileID, requestID(ctx))
+	if err != nil {
+		return RigContext{}, err
+	}
+	if profileID != "" {
+		state.CurrentProfileID = &profileID
 	}
 	result := RigContext{
 		CurrentProfileID: state.CurrentProfileID,

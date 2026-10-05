@@ -358,6 +358,7 @@ func sequenceMutationSchema() *jsonschema.Schema {
 			"outcome":     stringSchema("Ara dispatch outcome"),
 			"receipt_id":  stringSchema("Ara operation receipt ID when supplied"),
 			"sequence_id": stringSchema("Saved Ara sequence ID"),
+			"error_class": stringSchema("Bounded mutation failure class, when present"),
 			"retry_safe":  {Type: "boolean"},
 			"replayed":    {Type: "boolean"},
 		}),
@@ -419,6 +420,9 @@ func sequenceMutationError(operation string, receipt MutationReceipt, err error)
 		if receipt.Outcome == ara.OutcomeUnknown {
 			return fmt.Errorf("%s outcome is unknown; reconcile in Ara before retrying: %w", operation, err)
 		}
+	}
+	if receipt.ErrorClass != "" {
+		return fmt.Errorf("%s returned %s outcome (%s): %w", operation, receipt.Outcome, boundedMutationErrorClass(receipt.ErrorClass), err)
 	}
 	return err
 }

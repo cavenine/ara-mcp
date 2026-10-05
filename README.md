@@ -89,6 +89,8 @@ and [SBC validation](docs/development.md#small-sbc-validation).
 - `list_sequences`, `get_sequence`, `list_sequence_templates`, and
   `validate_sequence`: inspect saved plans/templates and run structural/palette
   validation. Neither validation confirms rig compatibility or readiness.
+- `get_sequence_state`: read Ara's current run state; a missing in-memory state is not
+  evidence of completion.
 - `get_adapter_diagnostics`: Ara reachability and local process/runtime sample.
 
 ## Sequence-authoring tools
@@ -117,14 +119,29 @@ See the [sequence-authoring recipe](docs/sequence-authoring.md) for the pinned
   intent receipt ledger; lifecycle preflights fail closed on unknown run state. A
   reserved interrupt lane remains available when normal admission is saturated.
 
-Sequence execution and equipment-action tools are not available yet. Saved-plan
-mutations require the active control ID and intent ID and do not run equipment.
-See [T04](docs/plan.md#t04-ara-control-ownership-and-connection-lifecycle) and
-[T05](docs/plan.md#t05-sequence-authoring) for the control and authoring contracts.
+## Sequence-execution tools
+
+- `start_sequence` re-reads the saved plan, checks Ara structural validation and the
+  supported palette, rejects `ContinueOnError` plans, requires an active profile and
+  connected required equipment, checks camera exposure/gain/offset/binning limits,
+  and verifies each filter reference against profile labels and an available wheel slot.
+- `pause_sequence`, `resume_sequence`, `stop_sequence`, and `abort_sequence` require
+  the current `expected_run_id`; stop/abort use the reserved interrupt lane. Resume
+  sends `recenter: false` and `refocus: false` to avoid implicit equipment actions.
+- Execution commands return Ara's `accepted` receipt plus one immediate state
+  observation. `get_sequence_state` is the authoritative read; accepted is not
+  completion, and agent disconnect does not stop Ara's run.
+- Ara remains the final execution authority. The RPi4 simulator lifecycle was tested
+  on Ara build `34b59e6`; current-master/release compatibility and physical-rig support
+  are separate claims.
+
+See [T04](docs/plan.md#t04-ara-control-ownership-and-connection-lifecycle),
+[T05](docs/plan.md#t05-sequence-authoring), and
+[T06](docs/plan.md#t06-sequence-execution) for lifecycle contracts and compatibility
+limits. Manual equipment-action tools are not available yet.
 
 ## Planned capabilities
 
-- Start, pause, resume, stop, and monitor sequences.
 - Request manual actions through Ara, such as exposures, slews, and autofocus.
 - Retrieve image previews and operation results.
 - Monitor the application's own CPU/memory/goroutine and related usage on a

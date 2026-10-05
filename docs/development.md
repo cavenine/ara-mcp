@@ -160,12 +160,16 @@ An agent configuration uses its supported MCP config format. Generic server entr
 
 The process writes JSON logs to stderr and MCP frames to stdout only. Available
 tools include `get_server_context`, `get_rig_context`, `list_sequences`,
-`get_sequence`, `list_sequence_templates`, `validate_sequence`, and
-`get_adapter_diagnostics`. With T04 control configured, it also exposes
+`get_sequence`, `get_sequence_state`, `list_sequence_templates`,
+`validate_sequence`, and `get_adapter_diagnostics`. With T04 control configured, it also exposes
 `begin_control`, `end_control`, `create_sequence`, `update_sequence`, and
-`instantiate_sequence_template`. Validation is structural/palette checking, not
-rig/equipment preflight. See the [authoring recipe](sequence-authoring.md). No named
-MCP host compatibility is claimed yet.
+`instantiate_sequence_template`, plus T06's `start_sequence`, `pause_sequence`,
+`resume_sequence`, `stop_sequence`, and `abort_sequence`. Starts verify saved-body
+validity, camera-reported exposure/gain/offset/binning limits, connected required
+devices and profile/physical filter slots; Ara's own execution guards remain
+authoritative. Starts reject `ContinueOnError` plans. Commands report acceptance
+separately from the immediate state observation. No named MCP host compatibility is
+claimed yet.
 
 The stdio tool set includes `begin_control` and `end_control` in addition to the
 read tools below. Begin requires an active Ara profile and binds the session WebSocket;
@@ -382,11 +386,18 @@ For a remote daemon, forward its loopback listener over SSH:
 ssh -N -L 15555:127.0.0.1:5555 user@ara-host
 ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraControlSessionAndHeartbeat$' ./internal/ara
 ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraBeginControlRequiresProfileWithoutClaimingSlot$' ./internal/mcpserver
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraBeginControlUsesProfileRepositorySelection$' ./internal/mcpserver
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15555 go test -tags=integration -count=1 -run '^TestLiveAraSequenceStartAndStateWithPinnedOmniSim$' ./internal/mcpserver
 ```
 
 The manager test only attempts begin when Ara reports no active profile and confirms
 the control slot remains free. Record Ara build/API identity, platform, adapter commit,
 and test result; do not infer physical-equipment behavior from these session checks.
+The profile-selection test claims/releases control only when `/profiles.active_id` is
+set and the Ara control session is free; it sends no equipment command.
+The T06 test requires the `ara-mcp-t06-omnisim` profile and pinned simulator camera
+ID. It runs a short simulated capture, then exercises pause/resume/stop and abort on a
+bounded loop, and removes its test sequences on cleanup. It sends no telescope action.
 
 ## Agent-assisted development
 
