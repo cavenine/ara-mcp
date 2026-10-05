@@ -15,11 +15,15 @@ network-facing control requests.
 
 Use the official [MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk).
 Use Cobra for application commands and Viper for configuration, with typed,
-validated configuration passed into runtime components. Use Go's standard library
-for Ara HTTP calls, JSON, and logging where it covers the requirement.
+validated configuration passed into runtime components. The Ara client uses
+[Resty v2.17.2](https://github.com/go-resty/resty/tree/v2.17.2) behind
+`internal/ara/http_gateway.go`. The Ara client exposes the request/outcome contract;
+the gateway owns HTTP execution, status/body decoding, bounded reads, retry policy,
+and request instrumentation.
+Use Go's standard library for JSON and logging where it covers the requirement.
 Use Chi and its middleware for HTTP serving, and Chi render for ordinary HTTP
 payloads as described below. A WebSocket dependency can be selected when event
-integration is implemented. No runtime implementation exists yet.
+integration is implemented. The MCP server and transports are not implemented yet.
 
 See the [implementation plan](plan.md) for delivery tasks and the
 [development guide](development.md) for setup and verification commands.
@@ -68,6 +72,7 @@ optimizations; add only the caching/pooling/parallelism the measurements justify
 
 | Responsibility | Selected implementation |
 | --- | --- |
+| Outgoing Ara REST calls | Resty v2.17.2 in the private Ara HTTP gateway |
 | HTTP routing and composition | `github.com/go-chi/chi/v5` |
 | Request IDs, recovery, and route-scoped middleware | Chi's `middleware` package |
 | Ordinary diagnostic/status/error payloads | `github.com/go-chi/render` with typed payloads |

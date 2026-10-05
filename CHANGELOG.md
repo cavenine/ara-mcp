@@ -7,6 +7,8 @@ and dated headings. No release has been published.
 
 ### Added
 
+- Resty-backed Ara HTTP gateway with bounded request/response handling, explicit
+  accepted/unknown mutation outcomes, GET-only retries, and OpenTelemetry signals.
 - Go 1.27.x module and initial project documentation.
 - Tool-neutral agent instructions and development workflows under `.agents/`.
 - Commit-pinned JetBrains modern Go and samber Go skills, with upstream licenses

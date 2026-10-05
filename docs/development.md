@@ -23,9 +23,9 @@ This guide owns setup and verification commands for ara-mcp. Read
 
 ## Current state
 
-The repository contains project setup and package documentation only. There is
-no CLI, MCP listener, Ara client, or behavior test suite yet. `go build ./...`
-checks the existing package but does not produce a server executable.
+The repository has an in-progress Resty-backed Ara HTTP client and its hardware-free
+contract tests, but no CLI or MCP listener yet. `go build ./...` does not produce a
+server executable.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -61,9 +61,8 @@ go build ./...
 For an existing checkout, run the commands from its root. Create a descriptive
 feature branch before implementation; see [contribution conventions](../CONTRIBUTING.md).
 
-There are no module dependencies to download yet. Once dependencies are introduced,
-`go mod download` restores their pinned versions. Review module/checksum changes
-when adding or updating a dependency.
+`go mod download` restores the pinned runtime and test dependencies. Review module
+and checksum changes when adding or updating a dependency.
 
 ## Repository layout
 
@@ -190,8 +189,8 @@ For a real package/test, the focused command is:
 go test -count=1 -run '^TestName$' ./path/to/package
 ```
 
-Replace the placeholders with the actual package/test. The command is not runnable
-against the current setup because no runtime behavior tests exist yet.
+Replace the placeholders with the actual package/test. The T02 client tests run with
+`go test -race -count=1 ./internal/ara`.
 
 Tests must survive internal refactoring: exercise observable interfaces with
 `httptest` upstreams or MCP SDK clients, not duplicated implementation code or

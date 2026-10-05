@@ -13,9 +13,9 @@ interface alongside Ara's human-facing client.
 
 ## Status
 
-**Initial project setup.** The repository contains a Go module, documentation,
-agent guidance, and CI configuration. MCP tools, transports, authentication, and
-the Ara API client are not implemented yet. There is no runnable server or release.
+**Implementation in progress.** The Resty-backed Ara HTTP client and contract tests
+are under development. MCP tools, transports, and authentication are not implemented;
+there is no runnable server or release.
 
 ## Architecture
 
