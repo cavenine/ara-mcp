@@ -24,8 +24,9 @@ This guide owns setup and verification commands for ara-mcp. Read
 ## Current state
 
 T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, and T13's
-optional diagnostics HTTP listener are implemented. The current tools are
-read-only; HTTP MCP, mutations, and a release are not available yet.
+optional diagnostics HTTP listener are implemented, along with T04's explicit
+`begin_control`/`end_control` phase tools. These tools manage Ara's adapter session
+only; sequence/equipment mutations, HTTP MCP, and a release are not available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -160,6 +161,11 @@ An agent configuration uses its supported MCP config format. Generic server entr
 The process writes JSON logs to stderr and MCP frames to stdout only. Available
 tools are `get_server_context`, `get_rig_context`, `list_sequences`, `get_sequence`,
 and `get_adapter_diagnostics`. No named MCP host compatibility is claimed yet.
+
+The stdio tool set includes `begin_control` and `end_control` in addition to the
+read tools below. Begin requires an active Ara profile and binds the session WebSocket;
+ending or shutting down ara-mcp releases the slot without stopping Ara work. See the
+[T04 policy and remaining verification](first-release-policy.md#cooperative-control).
 
 The full [skill index](agent-instructions.md#public-go-skills) also routes type/
 generic safety and appropriate `lo`/`mo` use. Those helpers are selected for real

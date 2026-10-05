@@ -1,8 +1,10 @@
 # Logging and observability requirements
 
 **Status:** T02/T03 implement structured Ara/MCP instrumentation and local process
-sampling; T13 adds an optional Chi diagnostics listener with health/status and
-Prometheus metrics. Resource dashboard/exports and profiling remain planned.
+sampling; T04 adds control-phase logs, heartbeat freshness, and diagnostic connection
+state; T13 adds an optional Chi diagnostics listener with health/status and Prometheus
+metrics. T04 reconnect metrics/recovery, resource dashboard/exports, and profiling
+remain planned.
 
 These requirements apply to both stdio and Streamable HTTP. They observe the
 adapter and its interaction with Ara; Ara remains authoritative for imaging and

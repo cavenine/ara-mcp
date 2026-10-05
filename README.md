@@ -14,14 +14,16 @@ interface alongside Ara's human-facing client.
 ## Status
 
 **Implementation in progress.** T02's Resty-backed Ara HTTP client, T03's stdio
-MCP server/read-only Ara tools, and T13's optional diagnostics HTTP listener are
-implemented. Streamable HTTP MCP, mutations, and a release are not available yet.
+MCP server/read tools, T04's begin/end control-phase tools, and T13's optional
+diagnostics HTTP listener are implemented. Streamable HTTP MCP, sequence/equipment
+mutations, and a release are not available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
-context, saved sequence pages/details, and adapter/process diagnostics. No tool
-changes equipment or sequence state. Ara connectivity is needed only when calling
-Ara-backed tools; process diagnostics remain available when Ara is offline. Optional
-HTTP diagnostics expose `/healthz`, `/readyz`, `/status`, and `/metrics` separately.
+context, saved sequence pages/details, and adapter/process diagnostics. `begin_control`
+and `end_control` manage Ara's adapter session but do not change equipment or sequence
+state. Ara connectivity is needed only when calling Ara-backed tools; process
+diagnostics remain available when Ara is offline. Optional HTTP diagnostics expose
+`/healthz`, `/readyz`, `/status`, and `/metrics` separately.
 
 ## Architecture
 
@@ -85,6 +87,16 @@ and [SBC validation](docs/development.md#small-sbc-validation).
 - `get_rig_context`: profile, site/imaging defaults, filters, and available device status.
 - `list_sequences` and `get_sequence`: bounded saved-sequence listing and detail.
 - `get_adapter_diagnostics`: Ara reachability and local process/runtime sample.
+
+## Control-phase tools
+
+- `begin_control`: require an active Ara profile, claim Ara's single-client session,
+  and bind its session WebSocket before returning a local `control_id`.
+- `end_control`: release the adapter's Ara session and invalidate that `control_id`;
+  Ara runs continue. Process shutdown releases a held session best-effort.
+
+No sequence or equipment mutation tools are available yet. See [T04](docs/plan.md#t04-ara-control-ownership-and-connection-lifecycle)
+for outstanding arbitration and recovery work.
 
 ## Planned capabilities
 

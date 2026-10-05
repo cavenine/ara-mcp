@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -459,6 +460,165 @@ func TestConnectWithRequestIDClaimsAraControlSession(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), sessionID) {
 		t.Fatal("JSON-encoded control session exposed Ara's session capability")
+	}
+}
+
+func TestDisconnectWithRequestIDReleasesAraControlSession(t *testing.T) {
+	const sessionID = "b15e5138-12f0-4c41-8a43-ed79ef527e12"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/server/disconnect" {
+			t.Errorf("request = %s %s, want POST /api/v1/server/disconnect", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Request-ID"); got != "control-request-02" {
+			t.Errorf("request ID = %q, want control-request-02", got)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		if got, want := string(body), `{"session_id":"`+sessionID+`"}`; got != want {
+			t.Errorf("request body = %s, want %s", got, want)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.DisconnectWithRequestID(t.Context(), ControlSession{sessionID: sessionID}, "control-request-02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomeCompleted || result.Status != http.StatusNoContent {
+		t.Fatalf("result = %+v, want completed HTTP 204", result)
+	}
+}
+
+func TestOpenControlWebSocketBindsSessionAndNegotiatesProtocol(t *testing.T) {
+	type handshake struct {
+		path      string
+		sessionID string
+		version   string
+	}
+	observed := make(chan handshake, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observed <- handshake{
+			path: r.URL.Path, sessionID: r.Header.Get("X-Ara-Session"),
+			version: r.Header.Get("X-Ara-WS-Version"),
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		if _, _, err := conn.Read(context.Background()); err == nil {
+			t.Error("WebSocket read error = nil, want client close")
+		}
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "b15e5138-12f0-4c41-8a43-ed79ef527e12"
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test complete")
+
+	got := <-observed
+	if got.path != "/api/v1/ws" || got.sessionID != sessionID || got.version != "1" {
+		t.Fatalf("handshake = %+v, want path /api/v1/ws with bound session and protocol v1", got)
+	}
+}
+
+func TestOpenControlWebSocketDoesNotForwardSessionOnRedirect(t *testing.T) {
+	var redirected atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "b15e5138-12f0-4c41-8a43-ed79ef527e12"
+	_, err = client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: sessionID})
+	if err == nil || strings.Contains(err.Error(), sessionID) {
+		t.Fatalf("OpenControlWebSocket() error = %v, want sanitized redirect rejection", err)
+	}
+	if got := redirected.Load(); got != 0 {
+		t.Fatalf("redirect target requests = %d, want 0", got)
+	}
+}
+
+func TestMaintainControlWebSocketAnswersAraHeartbeatAndRejectsTakeover(t *testing.T) {
+	responses := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		ctx := context.Background()
+		if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"ping"}`)); err != nil {
+			t.Errorf("send Ara heartbeat: %v", err)
+			return
+		}
+		if _, payload, err := conn.Read(ctx); err != nil {
+			t.Errorf("read heartbeat response: %v", err)
+			return
+		} else {
+			responses <- string(payload)
+		}
+		if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"connection.request","request_id":"takeover-01","from":"human"}`)); err != nil {
+			t.Errorf("send takeover request: %v", err)
+			return
+		}
+		if _, payload, err := conn.Read(ctx); err != nil {
+			t.Errorf("read takeover response: %v", err)
+		} else {
+			responses <- string(payload)
+		}
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "b15e5138-12f0-4c41-8a43-ed79ef527e12"
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	heartbeats := make(chan time.Time, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocket(ctx, conn, func(at time.Time) { heartbeats <- at }, nil)
+	}()
+	if got, want := <-responses, `{"type":"pong"}`; got != want {
+		t.Fatalf("heartbeat response = %s, want %s", got, want)
+	}
+	if at := <-heartbeats; at.IsZero() {
+		t.Fatal("heartbeat timestamp is zero")
+	}
+	if got, want := <-responses, `{"type":"connection.response","request_id":"takeover-01","action":"reject"}`; got != want {
+		t.Fatalf("takeover response = %s, want %s", got, want)
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("MaintainControlWebSocket() error = nil after cancellation")
 	}
 }
 

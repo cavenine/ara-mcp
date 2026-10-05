@@ -112,7 +112,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T02 | [Ara HTTP client](#t02-ara-http-client) | Complete — merged in [PR #2](https://github.com/cavenine/ara-mcp/pull/2), commit `14c30de`; `go test -race -shuffle=on -count=1 ./...`, `go vet ./...`, `go build ./...`, `go mod tidy -diff`, `go mod verify`, formatting, and diff checks passed | T01 |
 | T03 | [Executable, stdio, and read-only tools](#t03-executable-stdio-and-read-only-tools) | Complete — process-level stdio smoke, five read-only tools, typed configuration, metrics/traces, and paced process diagnostics; repository checks and five platform cross-builds passed. Completion evidence below. | T02 |
 | T13 | [Basic diagnostics HTTP foundation](#t13-basic-diagnostics-http-foundation) | Complete — Chi diagnostics listener, access policy, probes/status/metrics, and middleware behavior verified. | T03 |
-| T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | In progress — Ara control-session claim contract implemented in the client; WebSocket binding and control arbitration remain | T03 |
+| T04 | [Ara control ownership and connection lifecycle](#t04-ara-control-ownership-and-connection-lifecycle) | In progress — stdio begin/end tools and bound-session heartbeat lifecycle are implemented; arbitration and recovery remain | T03 |
 | T05 | [Sequence authoring](#t05-sequence-authoring) | Pending | T04 |
 | T06 | [Sequence execution](#t06-sequence-execution) | Pending | T05 |
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Pending | T04, T06 |
@@ -353,14 +353,27 @@ IDs expire correctly, and that overload cannot prevent supported stop/abort disp
 Connection metrics and diagnostic state distinguish denied ownership, a broken
 WebSocket, and a healthy read-only adapter.
 
-**Progress (2026-10-05):** added `ConnectWithRequestID` to the Ara client for the
-verified `/server/connect` contract: a fresh claim sends `session_id: null`, an
-optional existing capability supports same-session reclaim, and the returned
-capability is kept out of request logs and tracing attributes. RED:
-`go test -count=1 -run '^TestConnectWithRequestIDClaimsAraControlSession$' ./internal/ara`
-failed because the client method was missing. GREEN: the same command passed after
-implementation. This is only the REST claim primitive; it does not yet bind the
-session WebSocket, expose control tools, or authorize mutations.
+**Progress (2026-10-05):** implemented stdio `begin_control`/`end_control`, active
+profile validation, Ara control-session claim/release calls, and the session-bound
+WebSocket lifecycle. It uses Ara's `X-Ara-Session` and `X-Ara-WS-Version: 1` headers,
+answers application-level heartbeats with text `pong`, rejects takeover requests,
+reports connection/heartbeat state through adapter diagnostics, and best-effort
+releases the Ara slot on process shutdown without stopping a run. The session
+capability is not JSON-serializable or included in logs/traces. RED/GREEN:
+`go test -count=1 -run '^TestConnectWithRequestIDClaimsAraControlSession$' ./internal/ara`,
+`go test -count=1 -run '^TestDisconnectWithRequestIDReleasesAraControlSession$' ./internal/ara`,
+`go test -count=1 -run '^TestOpenControlWebSocketBindsSessionAndNegotiatesProtocol$' ./internal/ara`,
+and `go test -count=1 -run '^TestMaintainControlWebSocketAnswersAraHeartbeatAndRejectsTakeover$' ./internal/ara`
+each first failed because its client method was missing, then passed after implementation.
+`go test -count=1 -run '^TestControlManager_BeginRequiresConfiguredProfile$' ./internal/mcpserver`
+also failed before the manager existed and passed once an unconfigured rig was denied
+before `POST /server/connect`. Green integration checks:
+`go test -count=1 -run '^TestControlManager_BeginAndEndControlWithoutStoppingAraWork$' ./internal/mcpserver`,
+`go test -race -count=1 -run '^TestControlManager_RejectedClaimDoesNotBindSocket$' ./internal/mcpserver`,
+and `go test -count=1 -run '^TestControlToolsExposeBeginAndEnd$' ./internal/mcpserver`.
+Still outstanding: mutation intent arbitration/receipts, wiring the control guard to
+future mutation tools, automatic transient reconnect, server-identity/restart
+reconciliation, and dedicated connection metrics. No live Ara validation was run.
 
 ### T05 Sequence authoring
 

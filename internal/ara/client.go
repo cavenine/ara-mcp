@@ -156,6 +156,24 @@ func (c *Client) ConnectWithRequestID(ctx context.Context, hostname string, sess
 	return ControlSession{sessionID: response.SessionID, Hostname: response.Hostname, ConnectedAt: response.ConnectedAt}, result, nil
 }
 
+// DisconnectWithRequestID releases this adapter-owned session without affecting
+// Ara's active run. The local owner must invalidate its control ID regardless of
+// whether Ara reports that the session was already gone.
+func (c *Client) DisconnectWithRequestID(ctx context.Context, session ControlSession, requestID string) (Result, error) {
+	if session.sessionID == "" {
+		return Result{Outcome: OutcomeFailed}, errors.New("ara disconnect: control session is required")
+	}
+	body, err := json.Marshal(struct {
+		SessionID string `json:"session_id"`
+	}{SessionID: session.sessionID})
+	if err != nil {
+		return Result{Outcome: OutcomeFailed}, fmt.Errorf("encode Ara disconnect request: %w", err)
+	}
+	return c.Do(ctx, Request{
+		Method: http.MethodPost, Route: "/server/disconnect", Body: body, RequestID: requestID,
+	}, nil)
+}
+
 // ListSequences requests the bounded sequence list supported by current Ara.
 func (c *Client) ListSequences(ctx context.Context, limit int) (Page[jsontext.Value], Result, error) {
 	return c.ListSequencesWithRequestID(ctx, limit, "")
