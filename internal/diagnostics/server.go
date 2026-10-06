@@ -84,7 +84,7 @@ func (a Access) Validate() error {
 	return nil
 }
 
-// Runtime holds dependencies shared with the stdio server.
+// Runtime holds dependencies used by the diagnostics listener.
 type Runtime struct {
 	Ara             *ara.Client
 	Sampler         *monitor.Sampler
@@ -228,6 +228,7 @@ h1{margin:0;font-size:clamp(2rem,5vw,3rem);line-height:1.08;letter-spacing:-.04e
 .event-table th,.event-table td{padding:10px 16px;border-bottom:1px solid #263653}
 .event-table tbody tr:last-child td{border-bottom:0}
 .event-table tbody tr:first-child td{color:#e7faff}
+.event-time{min-width:145px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .event-sequence{width:90px;color:var(--cyan);font-variant-numeric:tabular-nums}
 .event-type{min-width:150px;color:#c8b5ff;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .event-failure .event-type,.event-failure td:last-child{color:#ff9b9b}
@@ -247,6 +248,7 @@ const dashboardScript = `
   const byId=(id)=>document.getElementById(id);
   const mib=(bytes)=>(bytes/1048576).toFixed(1)+" MiB";
   const localTime=(value)=>new Intl.DateTimeFormat(undefined,{hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date(value));
+  const eventTime=(value)=>{const date=new Date(value);return value&&Number.isFinite(date.valueOf())?date.toLocaleString():"—";};
   const numeric=(value)=>typeof value==="number"&&Number.isFinite(value);
   function gauge(id,valueId,value,capacity,display,accessible){
     const node=byId(id),text=byId(valueId);
@@ -320,14 +322,20 @@ const dashboardScript = `
     if(event.device_name)details.push((event.device_type?event.device_type+" ":"equipment ")+event.device_name);
     else if(event.device_type)details.push(event.device_type);
     if(event.device_id)details.push("id "+event.device_id);
+    if(event.removed)details.push("device removed");
     if(event.state)details.push("state "+event.state);
+    if(event.kind)details.push("kind "+event.kind);
+    if(event.action)details.push("action "+event.action);
+    if(event.details)details.push(event.details);
+    if(event.detected_utc)details.push("detected "+eventTime(event.detected_utc));
     if(event.sequence_id)details.push("sequence "+event.sequence_id);
     if(event.run_id)details.push("run "+event.run_id);
     if(event.job_id)details.push("job "+event.job_id);
     if(event.frame_id)details.push("frame "+event.frame_id);
     if(event.instructions_total>0)details.push("instructions "+event.instructions_completed+"/"+event.instructions_total);
     if(event.current_instruction_index!==undefined)details.push("item "+event.current_instruction_index);
-    if(event.failed_instruction_name)details.push("failed item "+event.failed_instruction_name);
+    if(event.failed_instruction_index!==undefined)details.push("failed item "+event.failed_instruction_index+(event.failed_instruction_name?" · "+event.failed_instruction_name:""));
+    else if(event.failed_instruction_name)details.push("failed item "+event.failed_instruction_name);
     if(event.failure_reason)details.push(event.failure_reason);
     return details.join(" · ")||"—";
   }
@@ -349,6 +357,7 @@ const dashboardScript = `
       for(const event of araEventRows){
         const row=document.createElement("tr"),failed=Boolean(event.failure_reason)||/(failed|error|failure)/i.test(String(event.type||""));
         if(failed)row.className="event-failure";
+        eventCell(row,eventTime(event.ts),"event-time");
         eventCell(row,event.seq,"event-sequence");
         eventCell(row,event.type||"unknown","event-type");
         eventCell(row,eventDetails(event),"");
@@ -414,7 +423,7 @@ func dashboardFragment(sample monitor.Snapshot, gap bool, araEvents AraEventSnap
 <section class="panel chart-card"><div class="chart-head"><div><h2>Memory usage over time</h2><p>Resident set size · MiB</p></div><output id="memory-chart-current" class="chart-current">—</output></div><svg class="chart" viewBox="0 0 620 180" role="img" aria-label="Memory usage over time"><path class="chart-gridline" d="M54 24H610 M54 68H610 M54 112H610 M54 156H610"/><text id="memory-axis-high" class="chart-axis" x="2" y="28">—</text><text id="memory-axis-middle" class="chart-axis" x="2" y="72">—</text><text class="chart-axis" x="28" y="160">0</text><path id="memory-line" class="chart-line memory-line" d=""/><circle id="memory-dot" class="chart-dot memory-dot" cx="54" cy="156" r="4" opacity="0"/></svg><p class="chart-foot"><span>Older</span><span>Now</span></p></section>
 </div>
 <p id="history-count" class="history-note" aria-live="polite">Waiting for samples</p>
-<section class="panel event-panel" aria-label="Ara server events"><div class="event-head"><h2>Ara server events</h2><span id="ara-event-state" class="event-state">Waiting for an owned session</span></div><p id="ara-event-note" class="event-note">Events come only from ara-mcp's existing owned Ara session socket; this page opens no WebSocket.</p><div class="event-table-wrap"><table class="event-table" aria-label="Ara server events"><thead><tr><th scope="col">Sequence</th><th scope="col">Event</th><th scope="col">Details</th></tr></thead><tbody id="ara-event-rows" aria-live="polite"><tr><td colspan="3" class="event-empty">No recent events from an owned Ara control session</td></tr></tbody></table></div><p id="ara-event-count" class="event-note">0 / 50 recent events · Newest first</p></section>
+<section class="panel event-panel" aria-label="Ara server events"><div class="event-head"><h2>Ara server events</h2><span id="ara-event-state" class="event-state">Waiting for an owned session</span></div><p id="ara-event-note" class="event-note">Events come only from ara-mcp's existing owned Ara session socket; this page opens no WebSocket.</p><div class="event-table-wrap"><table class="event-table" aria-label="Ara server events"><thead><tr><th scope="col">Time</th><th scope="col">Sequence</th><th scope="col">Event</th><th scope="col">Details</th></tr></thead><tbody id="ara-event-rows" aria-live="polite"><tr><td colspan="4" class="event-empty">No recent events from an owned Ara control session</td></tr></tbody></table></div><p id="ara-event-count" class="event-note">0 / 50 recent events · Newest first</p></section>
 <div id="sample-data" hidden data-gap="` + strconv.FormatBool(gap) + `" data-sample="` + html.EscapeString(string(data)) + `"></div>
 <div id="event-data" hidden data-event-update="` + html.EscapeString(string(eventData)) + `"></div>
 <p class="downloads"><a href="/resources.csv">Download CSV</a> · <a href="/resources.jsonl">Download JSONL</a></p></main>`

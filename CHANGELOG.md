@@ -12,9 +12,10 @@ and dated headings. No release has been published.
   samples. CPU is normalized to one logical core; the RSS gauge is relative to its
   visible history peak, not total system memory.
 - Add a newest-first dashboard table for the latest 50 Ara WebSocket events from the
-  adapter's existing owned-session buffer, including Ara's bounded device type/ID/name
-  on equipment events. It updates with the dashboard stream, reports stale/gapped
-  sessions, and never opens a second Ara WebSocket.
+  adapter's existing owned-session buffer. Rows include event time/type, device
+  type/ID/name, state, removal, and bounded fault/action/progress context where present.
+  It updates with the dashboard stream, reports stale/gapped sessions, and never opens a
+  second Ara WebSocket.
 - End-user install and connection guide with local stdio and beside-Ara Streamable
   HTTP MCP examples, deployment diagrams, and a concise tool reference. Document the
   `v0.1.0` first-version plan and provide a source-build and cross-platform archive/

@@ -40,7 +40,7 @@ func TestControlManagerRetainsBoundedDeduplicatedAraEvents(t *testing.T) {
 	manager.lastHeartbeat = &heartbeat
 	manager.mu.Unlock()
 	for seq := int64(1); seq <= maxRecentEvents+1; seq++ {
-		manager.recordEvent(ara.WebSocketEvent{Type: "equipment.connected", Seq: seq, DeviceType: "camera", DeviceID: "camera-1", DeviceName: "ASI2600", State: "connected"})
+		manager.recordEvent(ara.WebSocketEvent{Type: "equipment.fault", Timestamp: "2026-10-06T16:00:00Z", Seq: seq, DeviceType: "camera", DeviceID: "camera-1", DeviceName: "ASI2600", Kind: "disconnect_streak", Details: "three probes failed", DetectedUTC: "2026-10-06T16:00:00Z", State: "error"})
 	}
 	manager.recordEvent(ara.WebSocketEvent{Type: "sequence.progress", Seq: maxRecentEvents, SequenceID: "seq-1"})
 	snapshot := manager.RecentEvents()
@@ -50,8 +50,9 @@ func TestControlManagerRetainsBoundedDeduplicatedAraEvents(t *testing.T) {
 	if snapshot.Events[0].Seq != 2 || snapshot.Events[len(snapshot.Events)-1].Seq != maxRecentEvents+1 {
 		t.Fatalf("retained sequence range = %d..%d", snapshot.Events[0].Seq, snapshot.Events[len(snapshot.Events)-1].Seq)
 	}
-	if snapshot.Events[len(snapshot.Events)-1].DeviceType != "camera" || snapshot.Events[len(snapshot.Events)-1].DeviceID != "camera-1" || snapshot.Events[len(snapshot.Events)-1].DeviceName != "ASI2600" {
-		t.Fatalf("retained equipment event = %+v", snapshot.Events[len(snapshot.Events)-1])
+	lastEvent := snapshot.Events[len(snapshot.Events)-1]
+	if lastEvent.DeviceType != "camera" || lastEvent.DeviceID != "camera-1" || lastEvent.DeviceName != "ASI2600" || lastEvent.Kind != "disconnect_streak" || lastEvent.Details != "three probes failed" || lastEvent.Timestamp == "" || lastEvent.DetectedUTC == "" {
+		t.Fatalf("retained equipment event = %+v", lastEvent)
 	}
 }
 

@@ -329,7 +329,7 @@ func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
 	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{
 		Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now(),
 		RecentAraEvents: func() AraEventSnapshot {
-			return AraEventSnapshot{Available: true, Events: []ara.WebSocketEvent{{Type: "equipment.connected", Seq: 7, DeviceType: "camera", DeviceID: "camera-1", DeviceName: "ASI2600", State: "connected"}}}
+			return AraEventSnapshot{Available: true, Events: []ara.WebSocketEvent{{Type: "equipment.connected", Timestamp: "2026-10-06T16:00:00Z", Seq: 7, DeviceType: "camera", DeviceID: "camera-1", DeviceName: "ASI2600", State: "connected"}}}
 		},
 	})
 	if err != nil {
@@ -357,7 +357,7 @@ func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
 		}
 		event.WriteString(line)
 	}
-	if !strings.Contains(event.String(), "event: datastar-merge-fragments\n") || !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "data: selector #dashboard\n") || !strings.Contains(event.String(), "data: fragments <main id=\"dashboard\" class=\"page-shell\">") || !strings.Contains(event.String(), sample.InstanceID) || !strings.Contains(event.String(), "equipment.connected") || !strings.Contains(event.String(), "ASI2600") || !strings.Contains(event.String(), "camera-1") {
+	if !strings.Contains(event.String(), "event: datastar-merge-fragments\n") || !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "data: selector #dashboard\n") || !strings.Contains(event.String(), "data: fragments <main id=\"dashboard\" class=\"page-shell\">") || !strings.Contains(event.String(), sample.InstanceID) || !strings.Contains(event.String(), "equipment.connected") || !strings.Contains(event.String(), "ASI2600") || !strings.Contains(event.String(), "camera-1") || !strings.Contains(event.String(), "2026-10-06T16:00:00Z") {
 		t.Fatalf("Datastar patch event = %q", event.String())
 	}
 }
