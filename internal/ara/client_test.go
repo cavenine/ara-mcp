@@ -691,8 +691,67 @@ func TestMaintainControlWebSocketDeliversAraEvents(t *testing.T) {
 		})
 	}()
 	event := <-events
-	if event.Type != "equipment.connected" || event.Seq != 7 || event.DeviceType != "telescope" || event.DeviceID != "dev-1" || event.DeviceName != "EQ6-R" || event.SequenceID != "seq-1" || event.RunID != "run-2" || event.State != "connected" || event.InstructionsCompleted != 3 || event.InstructionsTotal != 9 {
+	if event.Type != "equipment.connected" || event.Seq != 7 || event.Timestamp != "2026-10-05T00:00:00Z" || event.DeviceType != "telescope" || event.DeviceID != "dev-1" || event.DeviceName != "EQ6-R" || event.SequenceID != "seq-1" || event.RunID != "run-2" || event.State != "connected" || event.InstructionsCompleted != 3 || event.InstructionsTotal != 9 {
 		t.Fatalf("event = %+v", event)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
+func TestMaintainControlWebSocketKeepsEquipmentFaultContext(t *testing.T) {
+	const faultTime = "2026-10-05T00:00:00Z"
+	frames := []string{
+		`{"type":"equipment.fault","ts":"` + faultTime + `","seq":8,"payload":{"device_type":"camera","device_id":"cam-1","device_name":"ASI2600","kind":"disconnect_streak","details":"three probes failed","detected_utc":"2026-10-05T00:00:00Z"}}`,
+		`{"type":"equipment.fault_action_taken","ts":"` + faultTime + `","seq":9,"payload":{"device_type":"camera","device_id":"cam-1","device_name":"ASI2600","kind":"disconnect_streak","action":"reconnecting"}}`,
+		`{"type":"equipment.state_changed","ts":"` + faultTime + `","seq":10,"payload":{"device_type":"camera","device_id":"cam-1","device_name":"ASI2600","state":"disconnected","removed":true}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		for _, frame := range frames {
+			if err := conn.Write(t.Context(), websocket.MessageText, []byte(frame)); err != nil {
+				t.Errorf("write event: %v", err)
+				return
+			}
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, len(frames))
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			if event.Seq == 10 {
+				cancel()
+			}
+		})
+	}()
+	fault, action, removed := <-events, <-events, <-events
+	if fault.Kind != "disconnect_streak" || fault.Details != "three probes failed" || fault.DetectedUTC != faultTime || fault.DeviceName != "ASI2600" {
+		t.Fatalf("equipment fault context = %+v", fault)
+	}
+	if action.Action != "reconnecting" || action.DeviceID != "cam-1" {
+		t.Fatalf("equipment fault action = %+v", action)
+	}
+	if !removed.Removed || removed.State != "disconnected" || removed.Timestamp != faultTime {
+		t.Fatalf("equipment removal = %+v", removed)
 	}
 	if err := <-done; err == nil {
 		t.Fatal("maintain returned nil after cancellation")

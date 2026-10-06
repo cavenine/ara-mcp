@@ -19,9 +19,10 @@ import (
 
 const araWebSocketVersion = "1"
 
-// WebSocketEvent is the bounded identity/progress subset consumed from Ara's event stream.
+// WebSocketEvent is a bounded context projection of Ara's event stream.
 type WebSocketEvent struct {
 	Type                    string `json:"type"`
+	Timestamp               string `json:"ts,omitempty"`
 	Seq                     int64  `json:"seq"`
 	Gap                     bool   `json:"gap,omitzero"`
 	SequenceID              string `json:"sequence_id,omitempty"`
@@ -31,6 +32,11 @@ type WebSocketEvent struct {
 	DeviceType              string `json:"device_type,omitempty"`
 	DeviceID                string `json:"device_id,omitempty"`
 	DeviceName              string `json:"device_name,omitempty"`
+	Kind                    string `json:"kind,omitempty"`
+	Details                 string `json:"details,omitempty"`
+	Action                  string `json:"action,omitempty"`
+	DetectedUTC             string `json:"detected_utc,omitempty"`
+	Removed                 bool   `json:"removed,omitzero"`
 	State                   string `json:"state,omitempty"`
 	InstructionsCompleted   int    `json:"instructions_completed"`
 	InstructionsTotal       int    `json:"instructions_total"`
@@ -172,9 +178,10 @@ func (c *Client) MaintainControlWebSocketWithEvents(ctx context.Context, conn *w
 		default:
 			if onEvent != nil {
 				var envelope struct {
-					Type    string `json:"type"`
-					Seq     int64  `json:"seq"`
-					Payload struct {
+					Type      string `json:"type"`
+					Timestamp string `json:"ts"`
+					Seq       int64  `json:"seq"`
+					Payload   struct {
 						SequenceID              string `json:"sequence_id"`
 						RunID                   string `json:"run_id"`
 						JobID                   string `json:"job_id"`
@@ -182,6 +189,11 @@ func (c *Client) MaintainControlWebSocketWithEvents(ctx context.Context, conn *w
 						DeviceType              string `json:"device_type"`
 						DeviceID                string `json:"device_id"`
 						DeviceName              string `json:"device_name"`
+						Kind                    string `json:"kind"`
+						Details                 string `json:"details"`
+						Action                  string `json:"action"`
+						DetectedUTC             string `json:"detected_utc"`
+						Removed                 bool   `json:"removed"`
 						State                   string `json:"state"`
 						InstructionsCompleted   int    `json:"instructions_completed"`
 						InstructionsTotal       int    `json:"instructions_total"`
@@ -193,11 +205,11 @@ func (c *Client) MaintainControlWebSocketWithEvents(ctx context.Context, conn *w
 				}
 				if err := json.Unmarshal(payload, &envelope); err == nil && len(envelope.Type) <= 128 && envelope.Type != "" && envelope.Seq > 0 {
 					identity := envelope.Payload
-					if len(identity.SequenceID) > 256 || len(identity.RunID) > 256 || len(identity.JobID) > 256 || len(identity.FrameID) > 256 || len(identity.DeviceType) > 64 || len(identity.DeviceID) > 256 || len(identity.DeviceName) > 256 || len(identity.State) > 64 || len(identity.FailedInstructionName) > 256 || len(identity.FailureReason) > 512 || identity.InstructionsCompleted < 0 || identity.InstructionsTotal < 0 || (identity.CurrentInstructionIndex != nil && *identity.CurrentInstructionIndex < 0) || (identity.FailedInstructionIndex != nil && *identity.FailedInstructionIndex < 0) {
+					if len(envelope.Timestamp) > 64 || len(identity.SequenceID) > 256 || len(identity.RunID) > 256 || len(identity.JobID) > 256 || len(identity.FrameID) > 256 || len(identity.DeviceType) > 64 || len(identity.DeviceID) > 256 || len(identity.DeviceName) > 256 || len(identity.Kind) > 64 || len(identity.Details) > 512 || len(identity.Action) > 64 || len(identity.DetectedUTC) > 64 || len(identity.State) > 64 || len(identity.FailedInstructionName) > 256 || len(identity.FailureReason) > 512 || identity.InstructionsCompleted < 0 || identity.InstructionsTotal < 0 || (identity.CurrentInstructionIndex != nil && *identity.CurrentInstructionIndex < 0) || (identity.FailedInstructionIndex != nil && *identity.FailedInstructionIndex < 0) {
 						onEvent(WebSocketEvent{Type: "ara.event_gap", Seq: envelope.Seq, Gap: true})
 						continue
 					}
-					onEvent(WebSocketEvent{Type: envelope.Type, Seq: envelope.Seq, SequenceID: identity.SequenceID, RunID: identity.RunID, JobID: identity.JobID, FrameID: identity.FrameID, DeviceType: identity.DeviceType, DeviceID: identity.DeviceID, DeviceName: identity.DeviceName, State: identity.State, InstructionsCompleted: identity.InstructionsCompleted, InstructionsTotal: identity.InstructionsTotal, CurrentInstructionIndex: identity.CurrentInstructionIndex, FailedInstructionIndex: identity.FailedInstructionIndex, FailedInstructionName: identity.FailedInstructionName, FailureReason: identity.FailureReason})
+					onEvent(WebSocketEvent{Type: envelope.Type, Timestamp: envelope.Timestamp, Seq: envelope.Seq, SequenceID: identity.SequenceID, RunID: identity.RunID, JobID: identity.JobID, FrameID: identity.FrameID, DeviceType: identity.DeviceType, DeviceID: identity.DeviceID, DeviceName: identity.DeviceName, Kind: identity.Kind, Details: identity.Details, Action: identity.Action, DetectedUTC: identity.DetectedUTC, Removed: identity.Removed, State: identity.State, InstructionsCompleted: identity.InstructionsCompleted, InstructionsTotal: identity.InstructionsTotal, CurrentInstructionIndex: identity.CurrentInstructionIndex, FailedInstructionIndex: identity.FailedInstructionIndex, FailedInstructionName: identity.FailedInstructionName, FailureReason: identity.FailureReason})
 				} else {
 					var resume struct {
 						Code string `json:"code"`

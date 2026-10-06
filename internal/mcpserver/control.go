@@ -61,7 +61,7 @@ const (
 	maxIntentWaiters         = 4
 	maxRecentEvents          = 128
 	maxRecentEventBytes      = 1 << 20
-	recentEventMetadataBytes = 2752 // Struct overhead plus bounded event strings, including device identity.
+	recentEventMetadataBytes = 4096 // Conservative per-event bound including device, fault, and timestamp details.
 )
 
 // MutationKind selects the adapter admission policy for a mutating request.

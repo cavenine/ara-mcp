@@ -143,9 +143,10 @@ The dashboard SSE stream is separate from both Ara's WebSocket and MCP's SSE.
 ### Ara server events
 
 The event table shows up to 50 events, newest first, from the adapter's existing
-owned-session socket. Equipment events include Ara's bounded device type, ID, and
-name where supplied. It does not open an observer WebSocket. Events appear while a
-control session is active; the last rows remain visible after release. Reconnect or
+owned-session socket. Rows show Ara's event time/type, equipment type/ID/name, state,
+and bounded fault/action/progress context where supplied. It does not open an observer
+WebSocket. Events appear while a control session is active; the last rows remain visible
+after release. Reconnect or
 retention gaps and the dropped-event count are shown. Treat event rows as evidence of
 what Ara reported, not proof an operation completed; use Ara's sequence/job/frame state
 tools for current state.

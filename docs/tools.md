@@ -33,7 +33,7 @@ starting are separate calls, and `begin_control` is required for mutations.
 | `get_job_status` | Read an Ara background job. Job state is ephemeral and can disappear after Ara restarts. |
 | `list_frames`, `get_frame` | Browse saved frames and read frame metadata. |
 | `get_frame_preview` | Return a bounded JPEG preview (maximum 1 MiB); Ara can return a placeholder if the FITS file is unavailable. |
-| `get_recent_ara_events` | Read recent events from the adapter-owned session socket. Without a control session, event streaming is unavailable. Expired replay/overflow is reported as a gap; reconcile with state tools. |
+| `get_recent_ara_events` | Read bounded events from the adapter-owned session socket, including event time, equipment identity, state, progress, and fault/action context where Ara supplies it. Without control, no new events arrive; replay/overflow gaps are explicit. Reconcile with state tools. |
 | `get_adapter_diagnostics` | Read Ara reachability and a local process/runtime sample. |
 
 ## Control, authoring, and execution
