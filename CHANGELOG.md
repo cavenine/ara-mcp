@@ -7,6 +7,14 @@ and dated headings. No release has been published.
 
 ### Added
 
+- Initial T12 live resource monitoring on the optional diagnostics listener: bounded
+  shared sampler history, a self-updating page/SSE feed, and finite filtered CSV/JSONL
+  downloads, with retained/exported range metadata and explicit unavailable/truncated
+  range behavior. Add validated Viper limits and bounded export-duration/outcome and
+  subscriber/stream metrics, plus locally served Datastar JS v0.21.4 patch updates.
+  Add opt-in bounded rotating JSONL history and streaming archive exports. Remote-auth
+  remote/TLS browser behavior, archive disk-failure coverage, and SBC measurements
+  remain outstanding.
 - T07 manual equipment tools for camera exposures/cooler, telescope slew/park/unpark/
   abort, focuser move/autofocus, filter selection, PHD2 guiding start/stop/dither,
   and Ara's emergency-stop ladder.

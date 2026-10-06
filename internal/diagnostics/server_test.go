@@ -4,11 +4,18 @@
 package diagnostics
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/csv"
+	json "encoding/json/v2"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +25,8 @@ import (
 	"github.com/cavenine/ara-mcp/internal/monitor"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestHandlerProbesAccessAndStatus(t *testing.T) {
@@ -48,6 +57,8 @@ func TestHandlerProbesAccessAndStatus(t *testing.T) {
 		want int
 	}{
 		{name: "unauthorized", path: "/healthz", want: http.StatusUnauthorized},
+		{name: "unauthorized dashboard", path: "/", want: http.StatusUnauthorized},
+		{name: "unauthorized resource export", path: "/resources.csv", want: http.StatusUnauthorized},
 		{name: "health", path: "/healthz", user: "operator", pass: "secret", want: http.StatusOK},
 		{name: "ready", path: "/readyz", user: "operator", pass: "secret", want: http.StatusOK},
 		{name: "status", path: "/status", user: "operator", pass: "secret", want: http.StatusOK},
@@ -64,7 +75,7 @@ func TestHandlerProbesAccessAndStatus(t *testing.T) {
 			if response.Code != test.want {
 				t.Fatalf("status = %d, want %d: %s", response.Code, test.want, response.Body.String())
 			}
-			if response.Code == http.StatusOK && !strings.Contains(response.Header().Get("Content-Type"), "application/json") {
+			if response.Code == http.StatusOK && test.path != "/" && test.path != "/resources.csv" && !strings.Contains(response.Header().Get("Content-Type"), "application/json") {
 				t.Fatalf("content type = %q", response.Header().Get("Content-Type"))
 			}
 			if response.Header().Get("X-Request-ID") == "caller-controlled" {
@@ -172,5 +183,327 @@ func TestNewMetricsExportsOpenTelemetryInPrometheusFormat(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "diagnostics_test_calls_total") {
 		t.Fatalf("metrics response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestResourceExportsUseSharedSampleHistory(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sampler := monitor.NewSampler()
+	sample := sampler.Snapshot()
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path, contentType, want string
+	}{{"/resources.csv", "text/csv", "sample_sequence"}, {"/resources.jsonl", "application/x-ndjson", sample.InstanceID}} {
+		t.Run(test.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+			if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), test.contentType) || !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("resource export = %d %q %q", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+			if response.Header().Get("X-Resource-Instance-ID") != sample.InstanceID || response.Header().Get("X-Resource-Retained-Sample-Count") != "1" || response.Header().Get("X-Resource-Export-Sample-Count") != "1" || response.Header().Get("X-Resource-Export-Start") == "" {
+				t.Fatalf("resource export range headers = %v", response.Header())
+			}
+			if test.path == "/resources.csv" {
+				rows, err := csv.NewReader(strings.NewReader(response.Body.String())).ReadAll()
+				if err != nil || len(rows) != 2 || rows[1][2] != "1" || rows[1][1] != sample.InstanceID {
+					t.Fatalf("CSV snapshot = %v, %v", rows, err)
+				}
+			} else {
+				var exported exportSample
+				if err := json.Unmarshal([]byte(response.Body.String()), &exported); err != nil || exported.SampleSequence != sample.SampleSequence || exported.InstanceID != sample.InstanceID {
+					t.Fatalf("JSONL snapshot = %+v, %v", exported, err)
+				}
+			}
+		})
+	}
+}
+
+func TestHandlerServesPinnedDatastarRuntimeLocally(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{Ara: client, Sampler: monitor.NewSampler(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/assets/datastar-0.21.4.js", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "javascript") || !strings.Contains(response.Body.String(), "Datastar v0.21.4") {
+		t.Fatalf("pinned Datastar runtime = status %d type %q body starts %q", response.Code, response.Header().Get("Content-Type"), response.Body.String()[:min(len(response.Body.String()), 80)])
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `src="/assets/datastar-0.21.4.js"`) || strings.Contains(response.Body.String(), "cdn.") {
+		t.Fatalf("dashboard page does not use its local Datastar runtime: %s", response.Body.String())
+	}
+}
+
+func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sampler := monitor.NewSampler()
+	sample := sampler.Snapshot()
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	response, err := http.Get(server.URL + "/resources/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("stream response = %d %q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(response.Body)
+	var event strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\n" {
+			break
+		}
+		event.WriteString(line)
+	}
+	if !strings.Contains(event.String(), "event: datastar-merge-fragments\n") || !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "data: selector #dashboard\n") || !strings.Contains(event.String(), "data: fragments <main id=\"dashboard\">") || !strings.Contains(event.String(), sample.InstanceID) {
+		t.Fatalf("Datastar patch event = %q", event.String())
+	}
+}
+
+func TestResourceStreamMarksReplayedGap(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sampler := monitor.NewSampler()
+	sample := sampler.Snapshot()
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/resources/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Last-Event-ID", sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence+100, 10))
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	var event strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\n" {
+			break
+		}
+		event.WriteString(line)
+	}
+	if !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "history gap or process restart was detected") {
+		t.Fatalf("replay gap response = %q", event.String())
+	}
+}
+
+func TestResourceExportRejectsInvalidRangeBeforeStreaming(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{Ara: client, Sampler: monitor.NewSampler(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/resources.csv?from=not-a-time", nil))
+	if response.Code != http.StatusBadRequest || strings.Contains(response.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("invalid range response = %d, headers %v", response.Code, response.Header())
+	}
+}
+
+func TestResourceExportReportsAndRejectsUnavailableRetainedRange(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sampler := monitor.NewSampler()
+	sample := sampler.Snapshot()
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := url.Values{
+		"from": {sample.SampledAt.Add(-2 * time.Hour).Format(time.RFC3339Nano)},
+		"to":   {sample.SampledAt.Add(-time.Hour).Format(time.RFC3339Nano)},
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/resources.csv?"+values.Encode(), nil))
+	if response.Code != http.StatusRequestedRangeNotSatisfiable || response.Header().Get("X-Resource-Retained-Start") == "" || response.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("unavailable range = status %d headers %v body %q", response.Code, response.Header(), response.Body.String())
+	}
+	values.Del("to")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/resources.jsonl?"+values.Encode(), nil))
+	if response.Code != http.StatusOK || response.Header().Get("X-Resource-Range-Truncated") != "start" || response.Header().Get("X-Resource-Export-Sample-Count") != "1" {
+		t.Fatalf("partially retained range = status %d headers %v body %q", response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func TestArchiveExportsStreamRetainedJSONLAndCSV(t *testing.T) {
+	directory := t.TempDir()
+	archive, err := monitor.OpenArchive(directory, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sequence := range []uint64{1, 2, 4} {
+		if !archive.Record(monitor.Snapshot{SchemaVersion: "1", InstanceID: "archived-instance", SampleSequence: sequence, SampledAt: time.Unix(int64(sequence), 0), Goroutines: int(sequence)}) {
+			t.Fatalf("archive rejected sample %d", sequence)
+		}
+	}
+	if err := archive.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	segments, err := archive.OpenSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	segmentPath := filepath.Join(directory, segments[0].Name)
+	monitor.CloseArchiveSegments(segments)
+	segmentFile, err := os.OpenFile(segmentPath, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(segmentFile, "{broken archive row}\n"); err != nil {
+		segmentFile.Close()
+		t.Fatal(err)
+	}
+	if err := segmentFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{
+		Ara: client, Sampler: monitor.NewSampler(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		StartedAt: time.Now(), Archive: archive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path, contentType string
+	}{{"/resources.jsonl?source=archive&instance_id=archived-instance", "application/x-ndjson"}, {"/resources.csv?source=archive&instance_id=archived-instance", "text/csv"}} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), test.contentType) || response.Header().Get("X-Resource-Export-Sample-Count") != "3" || response.Header().Get("X-Resource-Archive-Gap-Count") != "2" || response.Header().Get("X-Resource-Archive-Corrupt-Records") != "1" || !strings.Contains(response.Body.String(), "archived-instance") {
+			t.Fatalf("archive export %s = status %d headers %v body %q", test.path, response.Code, response.Header(), response.Body.String())
+		}
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/resources.jsonl?source=archive&instance_id=missing", nil))
+	if response.Code != http.StatusRequestedRangeNotSatisfiable || response.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("missing archive instance = status %d headers %v", response.Code, response.Header())
+	}
+}
+
+func TestResourceExportsRecordMetricsAndBalanceActiveCount(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(t.Context()); err != nil {
+			t.Error(err)
+		}
+	})
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{
+		Ara: client, Sampler: monitor.NewSampler(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		StartedAt: time.Now(), Meter: provider.Meter("dashboard-test"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/resources.csv", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("CSV export status = %d", response.Code)
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/resources.jsonl?from=invalid", nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid export status = %d, want 400", response.Code)
+	}
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(t.Context(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	var exports, active int64
+	var durationCount uint64
+	for _, scope := range metrics.ScopeMetrics {
+		for _, item := range scope.Metrics {
+			switch item.Name {
+			case "resource.dashboard.exports", "resource.dashboard.active_exports":
+				sum, ok := item.Data.(metricdata.Sum[int64])
+				if !ok {
+					t.Fatalf("metric %s data = %T", item.Name, item.Data)
+				}
+				for _, point := range sum.DataPoints {
+					if item.Name == "resource.dashboard.exports" {
+						exports += point.Value
+					} else {
+						active += point.Value
+					}
+				}
+			case "resource.dashboard.export.duration":
+				histogram, ok := item.Data.(metricdata.Histogram[float64])
+				if !ok {
+					t.Fatalf("metric %s data = %T", item.Name, item.Data)
+				}
+				for _, point := range histogram.DataPoints {
+					durationCount += point.Count
+				}
+			}
+		}
+	}
+	if exports != 2 || active != 0 || durationCount != 2 {
+		t.Fatalf("exports=%d active=%d duration observations=%d; want 2, 0, 2", exports, active, durationCount)
 	}
 }

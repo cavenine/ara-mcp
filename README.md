@@ -20,8 +20,11 @@ actions, T09's authenticated Streamable HTTP MCP endpoint, and T13's optional
 diagnostics HTTP listener are implemented. HTTP protocol and concurrent-session
 behavior are tested with the official MCP Go SDK v1.8.0 client; no third-party host
 compatibility is claimed. T08 job/frame readers, bounded image thumbnails, and
-owned-session event monitoring are implemented. Resource dashboard/exports and a
-release are not available yet.
+owned-session event monitoring are implemented. With the optional diagnostics
+listener enabled, the resource page, Datastar SSE updates, live/archive CSV/JSONL
+exports, and bounded rotating archive are available. The page serves Datastar JS
+v0.21.4 with Go SDK v1.2.2. T10 still owns remote-deployment validation and SBC
+measurements. No release is available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
 context, saved sequence pages/details, sequence templates, validation results, and
@@ -181,15 +184,23 @@ The T07 routes are source-verified and covered by fake-Ara/MCP contract tests ag
 the pinned Ara master commit `6374eede73383851486e6fb498a3311a3be58d82`. They have
 not been exercised against a live daemon or physical equipment.
 
-## Planned capabilities
+## Resource dashboard and exports
 
-- Monitor the application's own CPU/memory/goroutine and related usage on a
-  self-hosted, automatically updating SSE dashboard.
-- Download retained resource statistics as CSV or JSONL files.
-- Optionally retain bounded rotating JSONL resource history across restarts for
-  postmortem diagnostics; the persistent-service example will enable it.
+- Retrieve image previews and operation results.
+- When the optional diagnostics listener is enabled, monitor process CPU, RSS/Go
+  memory, goroutines, uptime, and freshness on the self-hosted live page at `/`.
+- Download retained in-memory resource statistics at `/resources.csv` or
+  `/resources.jsonl`; both use the same ordered snapshot and support time/instance
+  filters. Responses identify retained and exported ranges/counts and reject wholly
+  unavailable ranges before streaming.
+- Sampling cadence, retained history, dashboard subscriber, and concurrent export
+  limits are configurable through Viper and validated before startup.
+- Set `resource-archive-dir` to enable the bounded rotating JSONL archive and archive
+  CSV/JSONL downloads; otherwise sampling remains in-memory only.
 
-These remain implementation goals. See the [architecture and API notes](docs/architecture.md)
+The Datastar frontend asset pairing and optional archive remain implementation goals;
+T10 still owns board measurement. See the [resource dashboard contract](docs/resource-dashboard.md)
+and [architecture and API notes](docs/architecture.md)
 for the existing Ara API and integration constraints, and the
 [implementation plan](docs/plan.md) for delivery order and acceptance criteria.
 

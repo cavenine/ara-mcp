@@ -26,9 +26,10 @@ This guide owns setup and verification commands for ara-mcp. Read
 T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, T04's explicit
 `begin_control`/`end_control` phase tools, T05's sequence-authoring tools, T06's
 sequence-execution tools, T07 manual equipment actions, T09's authenticated
-Streamable HTTP endpoint, T13's optional diagnostics HTTP listener, and T08's job/frame
-readers, previews, and owned-session event buffer are implemented. Dashboard/exports
-and a release are not available yet.
+Streamable HTTP endpoint, T13's optional diagnostics HTTP listener, T08's job/frame
+readers, previews, and owned-session event buffer, and T12's initial live/archive
+resource dashboard and exports are implemented. Remote/TLS deployment validation and
+T10 board measurements remain; no release is available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -112,6 +113,12 @@ Environment variables use the `ARA_MCP` prefix. Supported settings:
 | Diagnostics listener | `--diagnostics-listen` | `ARA_MCP_DIAGNOSTICS_LISTEN` | disabled |
 | Diagnostics Basic-auth username/password | not exposed as CLI flags | `ARA_MCP_DIAGNOSTICS_USERNAME` / `ARA_MCP_DIAGNOSTICS_PASSWORD` | unset |
 | Diagnostics TLS certificate/key | `--diagnostics-tls-cert` / `--diagnostics-tls-key` | `ARA_MCP_DIAGNOSTICS_TLS_CERT` / `ARA_MCP_DIAGNOSTICS_TLS_KEY` | unset |
+| Resource sample interval | `--resource-sample-interval` | `ARA_MCP_RESOURCE_SAMPLE_INTERVAL` | `2s` (250ms–1m) |
+| Resource history samples | `--resource-history-samples` | `ARA_MCP_RESOURCE_HISTORY_SAMPLES` | `1800` (maximum) |
+| Resource history age | `--resource-history-age` | `ARA_MCP_RESOURCE_HISTORY_AGE` | `1h` (maximum) |
+| Dashboard subscribers | `--dashboard-subscriber-limit` | `ARA_MCP_DASHBOARD_SUBSCRIBER_LIMIT` | `4` (maximum) |
+| Concurrent resource exports | `--resource-export-limit` | `ARA_MCP_RESOURCE_EXPORT_LIMIT` | `2` (maximum) |
+| Resource archive directory | `--resource-archive-dir` | `ARA_MCP_RESOURCE_ARCHIVE_DIR` | unset; memory-only |
 
 HTTP mode serves the SDK Streamable HTTP endpoint at `/mcp`. The bearer token is
 intentionally not exposed as a CLI flag, avoiding process-list disclosure. Use a
@@ -136,6 +143,12 @@ log-level: info
 timeout: 10s
 read-retries: 0
 diagnostics-listen: 127.0.0.1:9090
+resource-sample-interval: 2s
+resource-history-samples: 1800
+resource-history-age: 1h
+dashboard-subscriber-limit: 4
+resource-export-limit: 2
+# resource-archive-dir: /var/lib/ara-mcp/resources
 ```
 
 Resolve keys once into a typed, validated configuration before constructing the

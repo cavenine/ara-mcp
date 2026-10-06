@@ -8,12 +8,15 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestServeHTTPStartsAndShutsDown(t *testing.T) {
+	archiveDir := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +31,8 @@ func TestServeHTTPStartsAndShutsDown(t *testing.T) {
 		done <- Serve(ctx, Config{
 			AraURL: "http://127.0.0.1:5555", Transport: "http", LogLevel: "error", Timeout: time.Second,
 			HTTPListen: address, HTTPBearerToken: "0123456789abcdef0123456789abcdef",
+			ResourceSampleInterval: 2 * time.Second, ResourceHistorySamples: 1800, ResourceHistoryAge: time.Hour,
+			DashboardSubscriberLimit: 4, ResourceExportLimit: 2, ResourceArchiveDir: archiveDir,
 		}, "test", io.Discard)
 	}()
 	t.Cleanup(cancel)
@@ -65,5 +70,16 @@ func TestServeHTTPStartsAndShutsDown(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("HTTP service did not shut down after cancellation")
+	}
+	files, err := filepath.Glob(filepath.Join(archiveDir, "resource-*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("resource archive files = %v, want one retained segment", files)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil || !strings.Contains(string(data), `"schema_version":"1"`) {
+		t.Fatalf("resource archive did not flush a sample: %v %s", err, data)
 	}
 }

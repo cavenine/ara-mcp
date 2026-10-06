@@ -53,6 +53,12 @@ func NewCommand(options CommandOptions) *cobra.Command {
 	flags.String("diagnostics-listen", "", "optional diagnostics HTTP listen address")
 	flags.String("diagnostics-tls-cert", "", "diagnostics TLS certificate file")
 	flags.String("diagnostics-tls-key", "", "diagnostics TLS private key file")
+	flags.Duration("resource-sample-interval", 0, "process resource sample interval")
+	flags.Int("resource-history-samples", 0, "maximum retained resource samples")
+	flags.Duration("resource-history-age", 0, "maximum retained resource history age")
+	flags.Int("dashboard-subscriber-limit", 0, "maximum live resource dashboard streams")
+	flags.Int("resource-export-limit", 0, "maximum concurrent resource exports")
+	flags.String("resource-archive-dir", "", "optional directory for bounded rotating resource history")
 
 	var config Config
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
