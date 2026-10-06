@@ -177,6 +177,108 @@ func TestDitherGuiderUsesAraPixelQuery(t *testing.T) {
 	}
 }
 
+func TestGetJobStatusUsesAraContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/jobs/job-01" || r.Header.Get("X-Request-ID") != "request-01" {
+			t.Errorf("request = %s %s, request ID %q", r.Method, r.URL.Path, r.Header.Get("X-Request-ID"))
+		}
+		_, _ = io.WriteString(w, `{"job_id":"job-01","job_type":"autofocus","state":"running","done":3,"total":9,"started_utc":"2026-10-05T00:00:00Z"}`)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _, err := client.GetJobWithRequestID(t.Context(), "job-01", "request-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != "running" || job.Done != 3 || job.Total != 9 {
+		t.Fatalf("job = %+v", job)
+	}
+}
+
+func TestFramePreviewReturnsBoundedImageBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/frames/frame-01/thumbnail" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte{0xff, 0xd8, 0xff, 0xd9})
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, _, err := client.GetFrameThumbnailWithRequestID(t.Context(), "frame-01", "request-02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(image) != string([]byte{0xff, 0xd8, 0xff, 0xd9}) {
+		t.Fatalf("image bytes = %v", image)
+	}
+}
+
+func TestFrameThumbnailRejectsResponseAboveOneMiB(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(make([]byte, maxPreviewBytes+1))
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := client.GetFrameThumbnailWithRequestID(t.Context(), "frame-01", "request-03"); err == nil {
+		t.Fatal("oversized preview returned without error")
+	}
+}
+
+func TestFrameCatalogUsesAraCursorAndDetailRoutes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/frames":
+			if r.URL.Query().Get("limit") != "3" || r.URL.Query().Get("cursor") != "next/page" {
+				t.Errorf("frame query = %s", r.URL.RawQuery)
+			}
+			_, _ = io.WriteString(w, `{"items":[{"id":"frame-01","target_name":"M31"}],"next_cursor":null,"has_more":false}`)
+		case "/api/v1/frames/frame-01":
+			_, _ = io.WriteString(w, `{"id":"frame-01","file_size_bytes":42,"width":800,"height":600}`)
+		default:
+			t.Errorf("unexpected route: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _, err := client.ListFramesWithRequestID(t.Context(), 3, "next/page", "request-04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != "frame-01" {
+		t.Fatalf("frame page = %+v", page)
+	}
+	frame, _, err := client.GetFrameWithRequestID(t.Context(), "frame-01", "request-05")
+	if err != nil || frame.ID != "frame-01" || frame.Width != 800 {
+		t.Fatalf("frame = %+v, error = %v", frame, err)
+	}
+}
+
+func TestFrameListRejectsUnboundedPageParameters(t *testing.T) {
+	client, err := New(Config{BaseURL: "http://127.0.0.1:5555"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = client.ListFramesWithRequestID(t.Context(), 101, "", "request-06")
+	var requestError *RequestError
+	if !errors.As(err, &requestError) || requestError.Class != "invalid_request" {
+		t.Fatalf("error = %v, want invalid frame-list request", err)
+	}
+}
+
 func requireOutcome(result Result, err error, want Outcome) error {
 	if err != nil {
 		return err

@@ -116,7 +116,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T05 | [Sequence authoring](#t05-sequence-authoring) | Complete — authoring tools, adapter palette check, template/create/update round trips, conflict handling, recipe, and pinned LRGB evidence are recorded below | T04 |
 | T06 | [Sequence execution](#t06-sequence-execution) | Complete — live Ara/OmniSim lifecycle and device preflight verified on the RPi4 build; current-master/release compatibility remains under O1 | T05 |
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Complete — Ara client/tool contracts, capability/run preflight, interrupt lane, fake-Ara/MCP tests, and repository checks passed; no live-device claim | T04, T06 |
-| T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Pending | T06, T07 |
+| T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Implemented; contract tests pass, live T08 daemon check remains pending | T06, T07 |
 | T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Complete — authenticated SDK transport, committed-header fault accounting, and independent concurrent sessions verified with SDK v1.8.0; no named third-party host or target-board claim | T03, T04, T13 |
 | T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Pending | T03, T13 |
 | T10 | [Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation) | Pending | T05–T09, T12, T13 |
@@ -597,6 +597,40 @@ source/behavior compatibility remains bounded to pinned master commit
 remain outstanding under O1/T10.
 
 ### T08 Progress, events, and image previews
+
+**Implementation status (2026-10-05):** added Ara job status and cursor-paged frame
+list/detail readers, 1 MiB-bounded JPEG thumbnails as MCP image content, and a
+128-event/1 MiB shared buffer fed only by T04's adapter-owned WebSocket. Events are
+deduplicated by sequence, reconnect resumes from the last observed sequence, expired
+resume/buffer gaps are explicit, and diagnostics expose event freshness/backlog/drop
+state. Outside owned control, readers use REST and no monitoring socket is opened.
+Ara endpoint/service evidence is pinned to
+[`6374eede`](https://github.com/open-astro/openastro-ara/tree/6374eede73383851486e6fb498a3311a3be58d82).
+
+RED/GREEN evidence: `TestGetJobStatusUsesAraContract` and
+`TestFramePreviewReturnsBoundedImageBytes` first failed to compile because the client
+methods were absent; each passed after its client method was added.
+`TestFrameListRejectsUnboundedPageParameters` first failed because the Ara boundary
+returned an unclassified argument error; it now reports `RequestError` with the
+bounded `invalid_request` class.
+`TestMaintainControlWebSocketDeliversAraEvents` and
+`TestMaintainControlWebSocketReportsExpiredResumeAsGap` first failed because the event
+type/reader entry point was absent; both pass with the retained event support.
+`TestFramePreviewReturnsMCPImageContent` first failed because progress-tool
+registration did not exist, then passed with an SDK client receiving JPEG
+`ImageContent`; it also verifies `get_job_status`. Additional tests cover frame
+pagination/detail routes, 1 MiB preview bounds, and event count/dedup/overflow bounds.
+Focused GREEN commands: `go test -count=1 -run
+'^(TestGetJobStatusUsesAraContract|TestFramePreviewReturnsBoundedImageBytes|TestFrameThumbnailRejectsResponseAboveOneMiB|TestFrameCatalogUsesAraCursorAndDetailRoutes|TestFrameListRejectsUnboundedPageParameters|TestMaintainControlWebSocketDeliversAraEvents|TestMaintainControlWebSocketReportsExpiredResumeAsGap)$'
+./internal/ara` and `go test -count=1 -run
+'^(TestFramePreviewReturnsMCPImageContent|TestControlManagerRetainsBoundedDeduplicatedAraEvents|TestGetServerContext)$'
+./internal/mcpserver`. The live T08 event-resume/REST fallback flow has not been run
+against an Ara daemon; Ara job state remains ephemeral and lost event history requires
+the caller to reconcile through current-state REST readers.
+Final repository checks passed: `gofmt -l .`, `go mod tidy -diff`, `go mod verify`,
+`go vet ./...`, `go test -race -shuffle=on -count=1 ./...`, `go build ./...`, and
+`git diff --check`; cross-builds passed for Linux amd64/arm64, Darwin amd64/arm64,
+and Windows amd64. No target-board resource or live Ara T08 claim is made.
 
 **Goal:** let the agent inspect long-running work and captured results.
 

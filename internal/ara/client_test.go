@@ -657,6 +657,98 @@ func TestMaintainControlWebSocketAnswersAraHeartbeatAndRejectsTakeover(t *testin
 	}
 }
 
+func TestMaintainControlWebSocketDeliversAraEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		if err := conn.Write(t.Context(), websocket.MessageText, []byte(`{"type":"sequence.progress","ts":"2026-10-05T00:00:00Z","seq":7,"payload":{"sequence_id":"seq-1","run_id":"run-2","state":"running","instructions_completed":3,"instructions_total":9}}`)); err != nil {
+			t.Errorf("write event: %v", err)
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			cancel()
+		})
+	}()
+	event := <-events
+	if event.Type != "sequence.progress" || event.Seq != 7 || event.SequenceID != "seq-1" || event.RunID != "run-2" || event.State != "running" || event.InstructionsCompleted != 3 || event.InstructionsTotal != 9 {
+		t.Fatalf("event = %+v", event)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
+func TestMaintainControlWebSocketReportsExpiredResumeAsGap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		if _, _, err := conn.Read(t.Context()); err != nil {
+			t.Errorf("read resume request: %v", err)
+			return
+		}
+		if err := conn.Write(t.Context(), websocket.MessageText, []byte(`{"resumed":false,"code":"resume_token_expired"}`)); err != nil {
+			t.Errorf("write resume response: %v", err)
+			return
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	if err := client.ResumeControlWebSocket(t.Context(), conn, "42"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	gaps := make(chan WebSocketEvent, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			gaps <- event
+			cancel()
+		})
+	}()
+	gap := <-gaps
+	if !gap.Gap || gap.Type != "ara.resume_gap" {
+		t.Fatalf("resume observation = %+v", gap)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
 func TestDo_RecordsSanitizedMetricsAndTraceForDecodeFailure(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))

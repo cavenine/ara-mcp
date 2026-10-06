@@ -26,8 +26,9 @@ This guide owns setup and verification commands for ara-mcp. Read
 T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, T04's explicit
 `begin_control`/`end_control` phase tools, T05's sequence-authoring tools, T06's
 sequence-execution tools, T07 manual equipment actions, T09's authenticated
-Streamable HTTP endpoint, and T13's optional diagnostics HTTP listener are implemented.
-Job monitoring, dashboard/exports, and a release are not available yet.
+Streamable HTTP endpoint, T13's optional diagnostics HTTP listener, and T08's job/frame
+readers, previews, and owned-session event buffer are implemented. Dashboard/exports
+and a release are not available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -191,8 +192,9 @@ remain a separate optional listener with independent credentials.
 The process writes JSON logs to stderr and MCP frames to stdout only. Available
 tools include `get_server_context`, `get_rig_context`, `list_sequences`,
 `get_sequence`, `get_sequence_state`, `list_sequence_templates`,
-`validate_sequence`, and `get_adapter_diagnostics`. With T04 control configured, it also exposes
-`begin_control`, `end_control`, `create_sequence`, `update_sequence`, and
+`validate_sequence`, `get_adapter_diagnostics`, `get_job_status`, `list_frames`,
+`get_frame`, and `get_frame_preview`. With T04 control configured, it also exposes
+`begin_control`, `end_control`, `get_recent_ara_events`, `create_sequence`, `update_sequence`, and
 `instantiate_sequence_template`, plus T06's `start_sequence`, `pause_sequence`,
 `resume_sequence`, `stop_sequence`, and `abort_sequence`. Starts verify saved-body
 validity, camera-reported exposure/gain/offset/binning limits, connected required
@@ -207,8 +209,11 @@ T07 adds `capture_exposure`, `abort_exposure`, `set_camera_cooler`,
 `dither_guiding`, and `emergency_stop`. Normal
 actions require T04 control, connected device/capability preflight, and a fresh run
 snapshot; active/paused runs reject manual actions. Ara's accepted response remains
-distinct from frame/job identifiers and immediate device state. T08 will add frame
-and job readers.
+distinct from frame/job identifiers and immediate device state. `get_job_status`,
+`list_frames`, `get_frame`, and `get_frame_preview` expose the corresponding Ara
+records; previews are capped at 1 MiB. `get_recent_ara_events` reads only the existing
+adapter-owned socket, reports resume/retention gaps, and never opens an unbound monitor
+connection.
 
 The stdio tool set includes `begin_control` and `end_control` in addition to the
 read tools below. Begin requires an active Ara profile and binds the session WebSocket;

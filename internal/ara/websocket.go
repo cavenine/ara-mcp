@@ -19,6 +19,24 @@ import (
 
 const araWebSocketVersion = "1"
 
+// WebSocketEvent is the bounded identity/progress subset consumed from Ara's event stream.
+type WebSocketEvent struct {
+	Type                    string `json:"type"`
+	Seq                     int64  `json:"seq"`
+	Gap                     bool   `json:"gap,omitzero"`
+	SequenceID              string `json:"sequence_id,omitempty"`
+	RunID                   string `json:"run_id,omitempty"`
+	JobID                   string `json:"job_id,omitempty"`
+	FrameID                 string `json:"frame_id,omitempty"`
+	State                   string `json:"state,omitempty"`
+	InstructionsCompleted   int    `json:"instructions_completed"`
+	InstructionsTotal       int    `json:"instructions_total"`
+	CurrentInstructionIndex *int   `json:"current_instruction_index,omitempty"`
+	FailedInstructionIndex  *int   `json:"failed_instruction_index,omitempty"`
+	FailedInstructionName   string `json:"failed_instruction_name,omitempty"`
+	FailureReason           string `json:"failure_reason,omitempty"`
+}
+
 // WebSocketHandshakeError contains only the HTTP status, never the server body
 // or session capability.
 type WebSocketHandshakeError struct{ StatusCode int }
@@ -95,6 +113,11 @@ func (c *Client) ResumeControlWebSocket(ctx context.Context, conn *websocket.Con
 // application-level heartbeat, and rejects takeover requests so a human holder
 // is not displaced. Other event frames are reserved for the T08 event consumer.
 func (c *Client) MaintainControlWebSocket(ctx context.Context, conn *websocket.Conn, onHeartbeat func(time.Time), onTakeoverRejected func()) error {
+	return c.MaintainControlWebSocketWithEvents(ctx, conn, onHeartbeat, onTakeoverRejected, nil)
+}
+
+// MaintainControlWebSocketWithEvents also forwards Ara's sequenced event envelopes.
+func (c *Client) MaintainControlWebSocketWithEvents(ctx context.Context, conn *websocket.Conn, onHeartbeat func(time.Time), onTakeoverRejected func(), onEvent func(WebSocketEvent)) error {
 	if ctx == nil || conn == nil {
 		return errors.New("ara websocket: context and connection are required")
 	}
@@ -142,6 +165,41 @@ func (c *Client) MaintainControlWebSocket(ctx context.Context, conn *websocket.C
 			}
 			if onTakeoverRejected != nil {
 				onTakeoverRejected()
+			}
+		default:
+			if onEvent != nil {
+				var envelope struct {
+					Type    string `json:"type"`
+					Seq     int64  `json:"seq"`
+					Payload struct {
+						SequenceID              string `json:"sequence_id"`
+						RunID                   string `json:"run_id"`
+						JobID                   string `json:"job_id"`
+						FrameID                 string `json:"frame_id"`
+						State                   string `json:"state"`
+						InstructionsCompleted   int    `json:"instructions_completed"`
+						InstructionsTotal       int    `json:"instructions_total"`
+						CurrentInstructionIndex *int   `json:"current_instruction_index"`
+						FailedInstructionIndex  *int   `json:"failed_instruction_index"`
+						FailedInstructionName   string `json:"failed_instruction_name"`
+						FailureReason           string `json:"failure_reason"`
+					} `json:"payload"`
+				}
+				if err := json.Unmarshal(payload, &envelope); err == nil && len(envelope.Type) <= 128 && envelope.Type != "" && envelope.Seq > 0 {
+					identity := envelope.Payload
+					if len(identity.SequenceID) > 256 || len(identity.RunID) > 256 || len(identity.JobID) > 256 || len(identity.FrameID) > 256 || len(identity.State) > 64 || len(identity.FailedInstructionName) > 256 || len(identity.FailureReason) > 512 || identity.InstructionsCompleted < 0 || identity.InstructionsTotal < 0 || (identity.CurrentInstructionIndex != nil && *identity.CurrentInstructionIndex < 0) || (identity.FailedInstructionIndex != nil && *identity.FailedInstructionIndex < 0) {
+						onEvent(WebSocketEvent{Type: "ara.event_gap", Seq: envelope.Seq, Gap: true})
+						continue
+					}
+					onEvent(WebSocketEvent{Type: envelope.Type, Seq: envelope.Seq, SequenceID: identity.SequenceID, RunID: identity.RunID, JobID: identity.JobID, FrameID: identity.FrameID, State: identity.State, InstructionsCompleted: identity.InstructionsCompleted, InstructionsTotal: identity.InstructionsTotal, CurrentInstructionIndex: identity.CurrentInstructionIndex, FailedInstructionIndex: identity.FailedInstructionIndex, FailedInstructionName: identity.FailedInstructionName, FailureReason: identity.FailureReason})
+				} else {
+					var resume struct {
+						Code string `json:"code"`
+					}
+					if err := json.Unmarshal(payload, &resume); err == nil && resume.Code == "resume_token_expired" {
+						onEvent(WebSocketEvent{Type: "ara.resume_gap", Gap: true})
+					}
+				}
 			}
 		}
 	}

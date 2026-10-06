@@ -200,7 +200,7 @@ All applicable configuration values have range validation and SBC-aware tests.
 | Normal mutations | 1 dispatch at a time, explicit busy/conflict responses |
 | Interrupt lane | 1 reserved dispatch, independent of normal admissions |
 | MCP HTTP sessions | 4 where the selected SDK exposes session accounting |
-| Upstream event backlog | 128 events / 1 MiB per bounded consumer; overflow marks a gap and triggers reconciliation |
+| Upstream event backlog | 128 events / 1 MiB per active control phase, shared by consumers; overflow marks a gap and requires REST reconciliation |
 | JSON bodies / preview data | 2 MiB / 1 MiB respectively; explicit size errors |
 | Mutation intent ledger | At most 1,024 seen intents and 1 MiB of receipt state per control phase; no silent eviction |
 | Read-only Ara polling | Shared, paced at 5 seconds while needed; no unbound WS |

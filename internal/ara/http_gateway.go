@@ -234,10 +234,14 @@ func (g *httpGateway) doAttempt(ctx context.Context, input request, method strin
 		headers.Set("Idempotency-Key", input.IdempotencyKey)
 	}
 	g.propagator.Inject(ctx, propagation.HeaderCarrier(headers))
+	responseLimit := g.maxResponseBytes
+	if input.MaxResponseBytes > 0 && input.MaxResponseBytes < responseLimit {
+		responseLimit = input.MaxResponseBytes
+	}
 	request := g.client.R().
 		SetContext(ctx).
 		SetPathParams(input.PathParams).
-		SetResponseBodyLimit(g.maxResponseBytes)
+		SetResponseBodyLimit(responseLimit)
 	for key, values := range headers {
 		request.SetHeader(key, strings.Join(values, ", "))
 	}

@@ -157,6 +157,26 @@ All paths below start with `/api/v1`:
 | Events | WebSocket `/ws`; `GET /ws/catalog` |
 | Images and settings | `/frames`, `/sessions`, `/profile`, `/profiles` |
 
+T08 wraps the verified `GET /jobs/{id}`, cursor-paged `GET /frames`,
+`GET /frames/{id}`, and `GET /frames/{id}/thumbnail` routes in `internal/ara.Client`.
+Frame details omit Ara's server-local FITS path.
+Job state is in-memory and disappears on Ara restart. Thumbnail content is JPEG and
+is capped at 1 MiB before it reaches MCP; Ara may return its placeholder JPEG if the
+catalog entry's FITS file is missing. The implementation uses the real thumbnail
+route, which reads/writes Ara's bounded sidecar cache when available.
+
+The event reader extends only T04's session-bound WebSocket. It retains at most 128
+events and 1 MiB, deduplicates by Ara's monotonically increasing `seq`, resumes from
+the last observed sequence after reconnect, and reports an explicit gap after an
+expired resume cursor, sequence discontinuity, or buffer eviction. Retained records
+contain bounded IDs, sequence state/progress, and failure summaries rather than raw
+event payloads or FITS/image bytes. An idle stream remains
+healthy when the Ara heartbeat is fresh. Without owned control, ara-mcp makes no
+WebSocket connection; job/frame/sequence tools read current state over REST.
+`get_recent_ara_events` reports socket availability/freshness and retained gap/drop
+state; callers reconcile gaps with current Ara REST state rather than treating
+retained events as a durable journal.
+
 Ara also exposes guider, rotator, dome, switch, flat-device, calibration, mosaic,
 polar-alignment, diagnostics, and other operations. Select a useful tool surface
 instead of turning every REST route into an MCP tool automatically.
@@ -203,10 +223,15 @@ and [OpenAPI snapshot](https://github.com/open-astro/openastro-ara/blob/34b59e6d
   loss, the adapter re-reads server identity, profile, session liveness, resume cursor,
   and the bounded sequence page before reclaiming the same session ID. A changed
   daemon identity/build/profile or expired/rejected session invalidates the local
-  control ID; a new claim then requires an explicit tool call. General event handling
-  remains T08 work. Ara O2 still prevents a guaranteed global active-run scan.
+  control ID; a new claim then requires an explicit tool call. T08 consumes sequenced
+  events only on this owned socket and marks expired replay/buffer loss for REST
+  reconciliation. Ara O2 still prevents a guaranteed global active-run scan.
 
-Evidence: [validator](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/SequenceSchemaValidator.cs),
+Evidence: [job endpoint](https://github.com/open-astro/openastro-ara/blob/6374eede73383851486e6fb498a3311a3be58d82/OpenAstroAra.Server/Endpoints/JobsEndpoints.cs),
+[image endpoints](https://github.com/open-astro/openastro-ara/blob/6374eede73383851486e6fb498a3311a3be58d82/OpenAstroAra.Server/Endpoints/ImageEndpoints.cs),
+[frame repository](https://github.com/open-astro/openastro-ara/blob/6374eede73383851486e6fb498a3311a3be58d82/OpenAstroAra.Server/Services/SqliteFrameRepository.cs),
+[event catalog](https://github.com/open-astro/openastro-ara/blob/6374eede73383851486e6fb498a3311a3be58d82/OpenAstroAra.Server/Contracts/WsEvents/WsEventCatalog.cs),
+[validator](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/SequenceSchemaValidator.cs),
 [executor](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/SequencerService.cs),
 [client sessions](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Services/ClientSessionService.cs),
 and [WebSocket handling](https://github.com/open-astro/openastro-ara/blob/34b59e6de/OpenAstroAra.Server/Endpoints/WebSocketEndpoints.cs).

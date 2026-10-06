@@ -11,6 +11,11 @@ measurements, recovered-fault counting (including after committed headers), requ
 spans, and bearer/Origin enforcement on `/mcp`. Resource dashboard/exports and profiling
 remain planned.
 
+T08 counts processed Ara events by bounded category/outcome without identifier labels.
+`get_adapter_diagnostics` exposes last event time/sequence, retained backlog, gap, and
+dropped count; `get_recent_ara_events` returns the bounded buffer. Fresh heartbeat
+state, not ordinary event activity, determines whether an idle owned socket is stale.
+
 These requirements apply to both stdio and Streamable HTTP. They observe the
 adapter and its interaction with Ara; Ara remains authoritative for imaging and
 equipment state. Implement and test the relevant signals with each feature,
@@ -158,7 +163,7 @@ are defined with the relevant implementation task and documented beside declarat
 | MCP tool calls, latency, and in-flight work | Count logical calls and bounded outcomes, including rejected arguments, accepted work, failures, cancellation, and uncertain outcomes | T03 |
 | WebSocket/control health | Connection state, reconnect attempts, last confirmed heartbeat, and whether the adapter holds Ara control | T04 |
 | Observed operation results | Count observed terminal transitions separately from command acceptance; deduplicate replayed results | T06, T08 |
-| Event processing | Count known event categories and unknown events; expose processing/backlog/drop counts when buffering exists and last state-reconciliation time | T08 |
+| Event processing | `ara.events.processed` counts bounded categories (`sequence`, `equipment`, `job`, `frame`, `other`, `recovery`) and outcomes; diagnostics expose backlog, drops, last sequence, and gap | T08 |
 | HTTP MCP requests | Normalized Chi route/method latency/status and transport faults; separate stream lifetime from tool latency and distinguish protocol success from tool errors | T09 |
 | Runtime/process usage | Shared process CPU/RSS, Go memory/GC, goroutines, uptime, and available process statistics with explicit units/freshness | T03, T12 |
 | Resource dashboard/history/exports | Sampling failures, retained window/bytes, live subscribers, export concurrency/failures, and slow-consumer handling | T12 |

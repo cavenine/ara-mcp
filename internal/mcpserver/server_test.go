@@ -77,8 +77,8 @@ func TestGetServerContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 8 {
-		t.Fatalf("discovered %d tools, want 8", len(tools.Tools))
+	if len(tools.Tools) != 12 {
+		t.Fatalf("discovered %d tools, want 12", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
