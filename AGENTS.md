@@ -54,7 +54,10 @@ ara-mcp is a Go MCP adapter to OpenAstro Ara, using the official
 status and [docs/architecture.md](docs/architecture.md) for the call flow and API
 evidence. T02's Ara HTTP client, T03's stdio server/read tools, T04's control phase,
 T05's sequence authoring, T06's sequence execution, T07's manual equipment tools, and
-T13's diagnostics listener are implemented. Streamable HTTP remains planned.
+T09's authenticated Streamable HTTP transport, T10's RPi4/OmniSim deployment checks,
+T12's resource dashboard/exports, and T13's diagnostics listener are implemented.
+T08's live daemon validation remains pending; T11 release preparation is complete, but
+no release has been published and Ara compatibility limits remain documented.
 
 The call flow is always:
 

@@ -86,15 +86,26 @@ func (a Access) Validate() error {
 
 // Runtime holds dependencies shared with the stdio server.
 type Runtime struct {
-	Ara         *ara.Client
-	Sampler     *monitor.Sampler
-	Logger      *slog.Logger
-	Version     string
-	StartedAt   time.Time
-	Metrics     http.Handler
-	Meter       metric.Meter
-	ExportLimit int
-	Archive     *monitor.Archive
+	Ara             *ara.Client
+	Sampler         *monitor.Sampler
+	Logger          *slog.Logger
+	Version         string
+	StartedAt       time.Time
+	Metrics         http.Handler
+	Meter           metric.Meter
+	ExportLimit     int
+	Archive         *monitor.Archive
+	RecentAraEvents func() AraEventSnapshot
+}
+
+// AraEventSnapshot is the read-only view of events from an existing owned session socket.
+type AraEventSnapshot struct {
+	Available    bool                 `json:"available"`
+	Stale        bool                 `json:"stale"`
+	Gap          bool                 `json:"gap"`
+	LastSequence int64                `json:"last_sequence"`
+	Dropped      int64                `json:"dropped"`
+	Events       []ara.WebSocketEvent `json:"events"`
 }
 
 //go:embed assets/datastar-0.21.4.js
@@ -108,6 +119,8 @@ type dashboardMetrics struct {
 	subscriberRejects metric.Int64Counter
 	streams           metric.Int64Counter
 }
+
+const dashboardEventLimit = 50
 
 func newDashboardMetrics(meter metric.Meter) (dashboardMetrics, error) {
 	var result dashboardMetrics
@@ -161,17 +174,251 @@ func resourceSample(sample monitor.Snapshot) exportSample {
 	return result
 }
 
-func dashboardFragment(sample monitor.Snapshot, gap bool) (string, error) {
+const dashboardStyles = `
+:root{color-scheme:dark;--ink:#edf5ff;--muted:#9aa9c4;--panel:#111a31e8;--line:#273653;--cyan:#5ce1e6;--violet:#a98bff;--gold:#ffcf70;--track:#283653}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:radial-gradient(ellipse at 12% 4%,#23366d88,transparent 38rem),radial-gradient(ellipse at 94% 20%,#542c6b66,transparent 34rem),linear-gradient(160deg,#080d1c,#050814 60%,#0b1225);background-attachment:fixed}
+body::before{position:fixed;inset:0;z-index:0;pointer-events:none;content:"";opacity:.34;background-image:radial-gradient(1px 1px at 8% 18%,#fff 99%,transparent),radial-gradient(1px 1px at 28% 72%,#b8d5ff 99%,transparent),radial-gradient(1.5px 1.5px at 53% 12%,#fff 99%,transparent),radial-gradient(1px 1px at 76% 44%,#fff 99%,transparent),radial-gradient(1px 1px at 91% 83%,#c9d8ff 99%,transparent);background-size:390px 310px;animation:star-drift 90s linear infinite}
+@keyframes star-drift{to{background-position:390px 310px}}
+#stream{display:none}
+.page-shell{position:relative;z-index:1;width:min(1120px,calc(100% - 32px));margin:0 auto;padding:42px 0 54px}
+.masthead{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:26px}
+.eyebrow{margin:0 0 7px;color:var(--cyan);font-size:.75rem;font-weight:750;letter-spacing:.18em;text-transform:uppercase}
+h1{margin:0;font-size:clamp(2rem,5vw,3rem);line-height:1.08;letter-spacing:-.04em}
+.subtitle{margin:10px 0 0;color:var(--muted)}
+.live-pill{display:inline-flex;align-items:center;gap:9px;padding:8px 12px;border:1px solid #31555e;border-radius:999px;background:#0d202a;color:#aaf5e5;white-space:nowrap;font-size:.82rem}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#69f0c3;box-shadow:0 0 12px #69f0c3}
+.status{min-height:24px;margin:0 0 18px;color:var(--muted);font-size:.88rem}
+.metric-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}
+.panel{border:1px solid #263653;border-radius:18px;background:linear-gradient(145deg,#131e38f2,#0c1428f2);box-shadow:0 16px 48px #0005, inset 0 1px #ffffff08}
+.metric-card{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:220px;padding:22px 26px;overflow:hidden;position:relative}
+.metric-card::after{position:absolute;right:-55px;bottom:-105px;width:230px;height:230px;border:1px solid #ffffff0b;border-radius:50%;box-shadow:0 0 0 22px #ffffff04,0 0 0 48px #ffffff03;content:"";pointer-events:none}
+.metric-label{margin:0;color:var(--muted);font-size:.78rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.metric-value{display:block;margin-top:9px;font-size:clamp(1.6rem,4vw,2.3rem);font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+.metric-note{max-width:250px;margin:6px 0 0;color:var(--muted);font-size:.82rem}
+.gauge{--fill:0%;position:relative;display:grid;flex:0 0 132px;place-items:center;width:132px;aspect-ratio:1;border-radius:50%;background:conic-gradient(var(--gauge-color,var(--cyan)) var(--fill),var(--track) 0);filter:drop-shadow(0 0 18px color-mix(in srgb,var(--gauge-color,var(--cyan)) 22%,transparent))}
+.gauge::before{position:absolute;inset:10px;border:1px solid #ffffff12;border-radius:50%;background:#101a30;content:""}
+.gauge-core{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;text-align:center}
+.gauge-core strong{max-width:112px;overflow:hidden;font-size:1.55rem;font-variant-numeric:tabular-nums;letter-spacing:-.04em;text-overflow:ellipsis;white-space:nowrap}
+.gauge-core span{color:var(--muted);font-size:.7rem;letter-spacing:.08em;text-transform:uppercase}
+.memory-card{--gauge-color:var(--violet)}
+.chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.chart-card{min-width:0;padding:20px 22px 16px}
+.chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+.chart-head h2{margin:0;font-size:1rem;letter-spacing:.01em}
+.chart-head p{margin:4px 0 0;color:var(--muted);font-size:.78rem}
+.chart-current{color:var(--ink);font-size:.9rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chart{display:block;width:100%;height:auto;overflow:visible}
+.chart-gridline{stroke:#293755;stroke-dasharray:3 7;stroke-width:1}
+.chart-axis{fill:#8797b5;font:11px system-ui,sans-serif}
+.chart-line{fill:none;stroke:var(--cyan);stroke-linecap:round;stroke-linejoin:round;stroke-width:3;filter:drop-shadow(0 0 5px #5ce1e677)}
+.memory-line{stroke:var(--violet);filter:drop-shadow(0 0 5px #a98bff77)}
+.chart-dot{fill:#e8ffff;stroke:var(--cyan);stroke-width:3}.memory-dot{stroke:var(--violet)}
+.chart-foot{display:flex;justify-content:space-between;gap:8px;margin:4px 0 0;color:var(--muted);font-size:.72rem;font-variant-numeric:tabular-nums}
+.history-note{margin:17px 0 0;color:var(--muted);font-size:.78rem;text-align:center}
+.event-panel{margin-top:18px;overflow:hidden}
+.event-head{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:19px 22px 14px}
+.event-head h2{margin:0;font-size:1rem}
+.event-state{color:var(--muted);font-size:.78rem;text-align:right}
+.event-note{margin:0;padding:0 22px 14px;color:var(--muted);font-size:.78rem}
+.event-note.gap{color:var(--gold)}
+.event-table-wrap{max-height:340px;overflow:auto;border-top:1px solid var(--line)}
+.event-table{width:100%;border-collapse:collapse;text-align:left;font-size:.82rem}
+.event-table th{position:sticky;top:0;z-index:1;background:#101a30;color:var(--muted);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase}
+.event-table th,.event-table td{padding:10px 16px;border-bottom:1px solid #263653}
+.event-table tbody tr:last-child td{border-bottom:0}
+.event-table tbody tr:first-child td{color:#e7faff}
+.event-sequence{width:90px;color:var(--cyan);font-variant-numeric:tabular-nums}
+.event-type{min-width:150px;color:#c8b5ff;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.event-failure .event-type,.event-failure td:last-child{color:#ff9b9b}
+.event-empty{color:var(--muted);text-align:center}
+.downloads{margin:23px 0 0;text-align:center;color:var(--muted);font-size:.85rem}
+a{color:#a8dfff;text-decoration:none}a:hover{text-decoration:underline}a:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
+@media(max-width:760px){.page-shell{width:min(100% - 22px,600px);padding-top:28px}.metric-grid,.chart-grid{grid-template-columns:1fr}.metric-card{min-height:190px}.masthead{align-items:center}.live-pill{padding:7px 9px;font-size:.72rem}}
+@media(max-width:420px){.metric-card{padding:18px;gap:10px}.gauge{flex-basis:112px;width:112px}.gauge-core strong{font-size:1.3rem}.chart-card{padding:16px 12px}.masthead{align-items:flex-start;flex-direction:column}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+`
+
+const dashboardScript = `
+(()=>{
+  const history=[];
+  const historyLimit=60;
+  let lastRaw="",lastInstance="",lastSequence=0;
+  const byId=(id)=>document.getElementById(id);
+  const mib=(bytes)=>(bytes/1048576).toFixed(1)+" MiB";
+  const localTime=(value)=>new Intl.DateTimeFormat(undefined,{hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date(value));
+  const numeric=(value)=>typeof value==="number"&&Number.isFinite(value);
+  function gauge(id,valueId,value,capacity,display,accessible){
+    const node=byId(id),text=byId(valueId);
+    if(!node||!text)return;
+    const available=numeric(value),fill=available&&capacity>0?Math.max(0,Math.min(100,value/capacity*100)):0;
+    node.style.setProperty("--fill",fill+"%");
+    node.setAttribute("aria-valuenow",String(Math.round(fill)));
+    node.setAttribute("aria-valuetext",available?accessible(value):"Unavailable");
+    text.textContent=available?display(value):"—";
+  }
+  function chart(kind,field,base,format){
+    const line=byId(kind+"-line"),dot=byId(kind+"-dot"),high=byId(kind+"-axis-high"),middle=byId(kind+"-axis-middle");
+    const values=history.map((sample)=>numeric(sample[field])?sample[field]:null);
+    const max=Math.max(base,...values.filter(numeric));
+    let path="",connected=false,lastPoint=null;
+    values.forEach((value,index)=>{
+      if(value===null){connected=false;return;}
+      const x=54+(history.length<2?556:index/(history.length-1)*556);
+      const y=156-(value/max)*132;
+      path+=(connected?" L ":"M ")+x.toFixed(1)+" "+y.toFixed(1);
+      connected=true;lastPoint=[x,y];
+    });
+    if(line)line.setAttribute("d",path);
+    if(dot&&lastPoint){dot.setAttribute("cx",lastPoint[0]);dot.setAttribute("cy",lastPoint[1]);dot.setAttribute("opacity","1");}else if(dot)dot.setAttribute("opacity","0");
+    if(high)high.textContent=format(max);
+    if(middle)middle.textContent=format(max/2);
+    return max;
+  }
+  function freshness(sample){
+    const node=byId("freshness");
+    if(!node||!sample)return;
+    const age=Date.now()-Date.parse(sample.sampled_at);
+    if(age>5000){node.textContent="Stale · no sample received for "+Math.floor(age/1000)+" seconds";return;}
+    node.textContent=(sample.gap?"History gap or process restart · ":"Live sample · ")+localTime(sample.sampled_at)+" local time";
+  }
+  function render(){
+    if(!history.length)return;
+    const current=history[history.length-1];
+    const cpu=numeric(current.cpu_percent)?current.cpu_percent:null;
+    const memory=numeric(current.rss_bytes)?current.rss_bytes:null;
+    const peak=history.reduce((max,sample)=>numeric(sample.rss_bytes)?Math.max(max,sample.rss_bytes):max,0);
+    gauge("cpu-gauge","cpu-value",cpu,100,(value)=>value.toFixed(1)+"%",(value)=>value.toFixed(1)+"% of one logical core; ring caps at 100%");
+    gauge("memory-gauge","memory-value",memory,peak,mib,(value)=>mib(value)+" RSS; ring is relative to the visible history peak");
+    const cpus=byId("cpu-context");if(cpus)cpus.textContent=current.logical_cpus+" logical CPUs · one core = 100%";
+    const peakLabel=byId("memory-context");if(peakLabel)peakLabel.textContent="Ring scale: visible-window peak "+(peak?mib(peak):"—");
+    chart("cpu","cpu_percent",100,(value)=>value.toFixed(0)+"%");
+    chart("memory","rss_bytes",1,mib);
+    const count=byId("history-count");if(count)count.textContent=history.length+" / "+historyLimit+" recent samples";
+    const range=byId("history-range");if(range)range.textContent=localTime(history[0].sampled_at)+" — "+localTime(current.sampled_at);
+    const cpuNow=byId("cpu-chart-current");if(cpuNow)cpuNow.textContent=cpu===null?"Unavailable":cpu.toFixed(1)+"%";
+    const memoryNow=byId("memory-chart-current");if(memoryNow)memoryNow.textContent=memory===null?"Unavailable":mib(memory);
+    const cpuValue=byId("cpu-current");if(cpuValue)cpuValue.textContent=cpu===null?"Unavailable":cpu.toFixed(1)+"%";
+    const memoryValue=byId("memory-current");if(memoryValue)memoryValue.textContent=memory===null?"Unavailable":mib(memory);
+    freshness(current);
+  }
+  function ingest(){
+    const source=byId("sample-data"),raw=source&&source.dataset.sample;
+    if(!raw||raw===lastRaw)return;
+    let sample;
+    try{sample=JSON.parse(raw);}catch(_){return;}
+    const sequence=Number(sample.sample_sequence),gap=source.dataset.gap==="true";
+    if(history.length&&(gap||sample.instance_id!==lastInstance||sequence!==lastSequence+1))history.length=0;
+    sample.gap=gap;history.push(sample);
+    if(history.length>historyLimit)history.splice(0,history.length-historyLimit);
+    lastRaw=raw;lastInstance=sample.instance_id;lastSequence=sequence;render();
+  }
+  const araEventRows=[],eventLimit=50;
+  let lastEventRaw="",lastEventSequence=0,lastControlAvailable=false,araEventStatus={};
+  function eventDetails(event){
+    const details=[];
+    if(event.device_name)details.push((event.device_type?event.device_type+" ":"equipment ")+event.device_name);
+    else if(event.device_type)details.push(event.device_type);
+    if(event.device_id)details.push("id "+event.device_id);
+    if(event.state)details.push("state "+event.state);
+    if(event.sequence_id)details.push("sequence "+event.sequence_id);
+    if(event.run_id)details.push("run "+event.run_id);
+    if(event.job_id)details.push("job "+event.job_id);
+    if(event.frame_id)details.push("frame "+event.frame_id);
+    if(event.instructions_total>0)details.push("instructions "+event.instructions_completed+"/"+event.instructions_total);
+    if(event.current_instruction_index!==undefined)details.push("item "+event.current_instruction_index);
+    if(event.failed_instruction_name)details.push("failed item "+event.failed_instruction_name);
+    if(event.failure_reason)details.push(event.failure_reason);
+    return details.join(" · ")||"—";
+  }
+  function eventCell(row,value,className){
+    const cell=document.createElement("td");
+    cell.textContent=String(value===undefined||value===null?"":value);
+    if(className)cell.className=className;
+    row.append(cell);
+  }
+  function renderAraEvents(){
+    const body=byId("ara-event-rows");if(!body)return;
+    body.replaceChildren();
+    if(!araEventRows.length){
+      const row=document.createElement("tr"),cell=document.createElement("td");
+      cell.colSpan=3;cell.className="event-empty";
+      cell.textContent=araEventStatus.available?"Waiting for Ara events":"No recent events from an owned Ara control session";
+      row.append(cell);body.append(row);
+    }else{
+      for(const event of araEventRows){
+        const row=document.createElement("tr"),failed=Boolean(event.failure_reason)||/(failed|error|failure)/i.test(String(event.type||""));
+        if(failed)row.className="event-failure";
+        eventCell(row,event.seq,"event-sequence");
+        eventCell(row,event.type||"unknown","event-type");
+        eventCell(row,eventDetails(event),"");
+        body.append(row);
+      }
+    }
+    const state=byId("ara-event-state");
+    if(state)state.textContent=araEventStatus.available?(araEventStatus.stale?"Owned session · reconnecting or stale":"Owned session · live"):(araEventRows.length?"Session inactive · retained events":"Waiting for an owned session");
+    const note=byId("ara-event-note");
+    if(note){
+      note.classList.toggle("gap",Boolean(araEventStatus.gap));
+      note.textContent=araEventStatus.gap?"Event gap detected · "+(araEventStatus.dropped||0)+" dropped · reconcile with Ara state tools":"Events come only from ara-mcp's existing owned Ara session socket; this page opens no WebSocket.";
+    }
+    const count=byId("ara-event-count");if(count)count.textContent=araEventRows.length+" / "+eventLimit+" recent events";
+  }
+  function ingestAraEvents(){
+    const source=byId("event-data"),raw=source&&source.dataset.eventUpdate;
+    if(raw&&raw!==lastEventRaw){
+      let update;
+      try{update=JSON.parse(raw);}catch(_){return;}
+      if(update.available&&!lastControlAvailable){araEventRows.length=0;lastEventSequence=0;}
+      const events=Array.isArray(update.events)?update.events:[];
+      for(const event of events){
+        const sequence=Number(event.seq);
+        if(!Number.isFinite(sequence)||sequence<=lastEventSequence)continue;
+        araEventRows.unshift(event);lastEventSequence=sequence;
+        if(araEventRows.length>eventLimit)araEventRows.pop();
+      }
+      araEventStatus=update;lastControlAvailable=Boolean(update.available);lastEventRaw=raw;
+    }
+    renderAraEvents();
+  }
+  function updateDashboard(){ingest();ingestAraEvents();}
+  new MutationObserver(updateDashboard).observe(document.body,{subtree:true,attributes:true,attributeFilter:["data-sample","data-gap","data-event-update"]});
+  updateDashboard();
+  setInterval(()=>freshness(history[history.length-1]),1000);
+})();
+`
+
+func dashboardFragment(sample monitor.Snapshot, gap bool, araEvents AraEventSnapshot, newAraEvents []ara.WebSocketEvent) (string, error) {
 	data, err := json.Marshal(resourceSample(sample))
 	if err != nil {
 		return "", fmt.Errorf("marshal dashboard sample: %w", err)
+	}
+	araEvents.Events = newAraEvents
+	eventData, err := json.Marshal(araEvents)
+	if err != nil {
+		return "", fmt.Errorf("marshal Ara dashboard events: %w", err)
 	}
 	sampledAt := sample.SampledAt.UTC().Format(time.RFC3339Nano)
 	status := "Last sample: " + sampledAt
 	if gap {
 		status = "A history gap or process restart was detected; showing latest sample: " + sampledAt
 	}
-	return `<main id="dashboard"><h1>ara-mcp resources</h1><p id="freshness" data-sampled-at="` + html.EscapeString(sampledAt) + `" aria-live="polite">` + html.EscapeString(status) + ` · CPU % uses one logical core · RSS/Go memory in bytes</p><pre id="sample">` + html.EscapeString(string(data)) + `</pre><p><a href="/resources.csv">Download CSV</a> · <a href="/resources.jsonl">Download JSONL</a></p></main>`, nil
+	fragment := `<main id="dashboard" class="page-shell"><header class="masthead"><div><p class="eyebrow">Ara observatory · live telemetry</p><h1>OpenAstro Ara MCP</h1><p class="subtitle">A live view of the ara-mcp process</p></div><span class="live-pill"><span class="live-dot" aria-hidden="true"></span>Local process</span></header>
+<p id="freshness" class="status" data-sampled-at="` + html.EscapeString(sampledAt) + `" aria-live="polite">` + html.EscapeString(status) + `</p>
+<div class="metric-grid">
+<article class="panel metric-card"><div><p class="metric-label">CPU · one core = 100%</p><strong id="cpu-current" class="metric-value">—</strong><p id="cpu-context" class="metric-note">Waiting for sample</p><p class="metric-note">Ring caps at 100%; value and chart can exceed it.</p></div><div id="cpu-gauge" class="gauge" role="meter" aria-label="CPU usage gauge" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Waiting for sample"><div class="gauge-core"><strong id="cpu-value">—</strong><span>CPU</span></div></div></article>
+<article class="panel metric-card memory-card"><div><p class="metric-label">Resident memory · RSS</p><strong id="memory-current" class="metric-value">—</strong><p id="memory-context" class="metric-note">Ring scale: visible-window peak</p><p class="metric-note">RSS is process memory, not Go heap or system capacity.</p></div><div id="memory-gauge" class="gauge" role="meter" aria-label="RSS memory usage gauge" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Waiting for sample"><div class="gauge-core"><strong id="memory-value">—</strong><span>RSS</span></div></div></article>
+</div>
+<div class="chart-grid">
+<section class="panel chart-card"><div class="chart-head"><div><h2>CPU usage over time</h2><p>Percent of one logical core</p></div><output id="cpu-chart-current" class="chart-current">—</output></div><svg class="chart" viewBox="0 0 620 180" role="img" aria-label="CPU usage over time"><path class="chart-gridline" d="M54 24H610 M54 68H610 M54 112H610 M54 156H610"/><text id="cpu-axis-high" class="chart-axis" x="2" y="28">100%</text><text id="cpu-axis-middle" class="chart-axis" x="2" y="72">50%</text><text class="chart-axis" x="28" y="160">0%</text><path id="cpu-line" class="chart-line" d=""/><circle id="cpu-dot" class="chart-dot" cx="54" cy="156" r="4" opacity="0"/></svg><p id="history-range" class="chart-foot"><span>Waiting for samples</span><span>Recent samples</span></p></section>
+<section class="panel chart-card"><div class="chart-head"><div><h2>Memory usage over time</h2><p>Resident set size · MiB</p></div><output id="memory-chart-current" class="chart-current">—</output></div><svg class="chart" viewBox="0 0 620 180" role="img" aria-label="Memory usage over time"><path class="chart-gridline" d="M54 24H610 M54 68H610 M54 112H610 M54 156H610"/><text id="memory-axis-high" class="chart-axis" x="2" y="28">—</text><text id="memory-axis-middle" class="chart-axis" x="2" y="72">—</text><text class="chart-axis" x="28" y="160">0</text><path id="memory-line" class="chart-line memory-line" d=""/><circle id="memory-dot" class="chart-dot memory-dot" cx="54" cy="156" r="4" opacity="0"/></svg><p class="chart-foot"><span>Older</span><span>Now</span></p></section>
+</div>
+<p id="history-count" class="history-note" aria-live="polite">Waiting for samples</p>
+<section class="panel event-panel" aria-label="Ara server events"><div class="event-head"><h2>Ara server events</h2><span id="ara-event-state" class="event-state">Waiting for an owned session</span></div><p id="ara-event-note" class="event-note">Events come only from ara-mcp's existing owned Ara session socket; this page opens no WebSocket.</p><div class="event-table-wrap"><table class="event-table" aria-label="Ara server events"><thead><tr><th scope="col">Sequence</th><th scope="col">Event</th><th scope="col">Details</th></tr></thead><tbody id="ara-event-rows" aria-live="polite"><tr><td colspan="3" class="event-empty">No recent events from an owned Ara control session</td></tr></tbody></table></div><p id="ara-event-count" class="event-note">0 / 50 recent events · Newest first</p></section>
+<div id="sample-data" hidden data-gap="` + strconv.FormatBool(gap) + `" data-sample="` + html.EscapeString(string(data)) + `"></div>
+<div id="event-data" hidden data-event-update="` + html.EscapeString(string(eventData)) + `"></div>
+<p class="downloads"><a href="/resources.csv">Download CSV</a> · <a href="/resources.jsonl">Download JSONL</a></p></main>`
+	return strings.ReplaceAll(fragment, "\n", ""), nil
 }
 
 func parseDashboardCursor(value string) (string, uint64, bool, bool) {
@@ -184,6 +431,44 @@ func parseDashboardCursor(value string) (string, uint64, bool, bool) {
 	}
 	sequence, err := strconv.ParseUint(rawSequence, 10, 64)
 	return instance, sequence, true, err == nil
+}
+
+func lastDashboardEvents(events []ara.WebSocketEvent) []ara.WebSocketEvent {
+	if len(events) > dashboardEventLimit {
+		return events[len(events)-dashboardEventLimit:]
+	}
+	return events
+}
+
+type dashboardAraEventCursor struct {
+	lastSequence  int64
+	lastAvailable bool
+	initialized   bool
+}
+
+func (cursor *dashboardAraEventCursor) advance(snapshot AraEventSnapshot) []ara.WebSocketEvent {
+	var events []ara.WebSocketEvent
+	if !cursor.initialized || (snapshot.Available && !cursor.lastAvailable) {
+		cursor.lastSequence = 0
+		events = lastDashboardEvents(snapshot.Events)
+	} else {
+		for _, event := range snapshot.Events {
+			if event.Seq > cursor.lastSequence {
+				events = append(events, event)
+				cursor.lastSequence = event.Seq
+			}
+		}
+	}
+	for _, event := range events {
+		if event.Seq > cursor.lastSequence {
+			cursor.lastSequence = event.Seq
+		}
+	}
+	if snapshot.LastSequence > cursor.lastSequence {
+		cursor.lastSequence = snapshot.LastSequence
+	}
+	cursor.lastAvailable, cursor.initialized = snapshot.Available, true
+	return events
 }
 
 // NewMetrics creates an isolated Prometheus registry and an OpenTelemetry reader for it.
@@ -248,8 +533,17 @@ func Handler(access Access, runtime Runtime) (http.Handler, error) {
 		_, _ = w.Write(datastarRuntime)
 	})
 	router.Get("/", func(w http.ResponseWriter, _ *http.Request) {
+		araEvents := AraEventSnapshot{}
+		if runtime.RecentAraEvents != nil {
+			araEvents = runtime.RecentAraEvents()
+		}
+		fragment, err := dashboardFragment(runtime.Sampler.Snapshot(), false, araEvents, lastDashboardEvents(araEvents.Events))
+		if err != nil {
+			http.Error(w, "dashboard unavailable", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>ara-mcp resources</title><script type="module" src="/assets/datastar-0.21.4.js"></script><div id="stream" data-on-load="sse('/resources/stream')"></div><main id="dashboard"><h1>ara-mcp resources</h1><p id="freshness" aria-live="polite">Waiting for sample…</p><pre id="sample">No sample yet</pre><p><a href="/resources.csv">Download CSV</a> · <a href="/resources.jsonl">Download JSONL</a></p></main><script>setInterval(()=>{const node=document.querySelector('#freshness');const sampled=Date.parse(node?.dataset.sampledAt||'');if(Number.isFinite(sampled)&&Date.now()-sampled>5000)node.textContent='Stale: no sample received for 5 seconds'},1000)</script></html>`)
+		_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><title>OpenAstro Ara MCP</title><style>`+dashboardStyles+`</style><script type="module" src="/assets/datastar-0.21.4.js"></script></head><body class="starfield"><div id="stream" data-on-load="sse('/resources/stream')"></div>`+fragment+`<script>`+dashboardScript+`</script></body></html>`)
 	})
 	router.Get("/resources.csv", func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
@@ -349,6 +643,7 @@ func Handler(access Access, runtime Runtime) (http.Handler, error) {
 		defer unsubscribe()
 		sse := datastar.NewSSE(w, r)
 		lastInstance, lastSequence, cursorPresent, cursorValid := parseDashboardCursor(r.Header.Get("Last-Event-ID"))
+		var araEventCursor dashboardAraEventCursor
 		for {
 			select {
 			case sample, ok := <-updates:
@@ -360,7 +655,12 @@ func Handler(access Access, runtime Runtime) (http.Handler, error) {
 				if !cursorPresent && lastInstance != "" {
 					gap = sample.InstanceID != lastInstance || sample.SampleSequence != lastSequence+1
 				}
-				fragment, err := dashboardFragment(sample, gap)
+				araEvents := AraEventSnapshot{}
+				if runtime.RecentAraEvents != nil {
+					araEvents = runtime.RecentAraEvents()
+				}
+				newAraEvents := araEventCursor.advance(araEvents)
+				fragment, err := dashboardFragment(sample, gap, araEvents, newAraEvents)
 				id := sample.InstanceID + ":" + strconv.FormatUint(sample.SampleSequence, 10)
 				if err != nil || sse.Send(datastar.EventType("datastar-merge-fragments"), []string{"selector #dashboard", "mergeMode morph", "fragments " + fragment}, datastar.WithSSEEventId(id)) != nil {
 					streamOutcome = "write_error"
