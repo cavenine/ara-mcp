@@ -12,8 +12,11 @@ and dated headings. No release has been published.
   and Ara's emergency-stop ladder.
   Actions share T04 control/arbitration, refresh run/device/capability state, reserve
   interrupt capacity for stop actions, and return acceptance separately from frame,
-  job, and immediate device observations. Frame/job monitoring remains unavailable
-  until T08.
+  job, and immediate device observations.
+- T08 job and frame readers (`get_job_status`, `list_frames`, `get_frame`), Ara JPEG
+  thumbnails returned as MCP image content with a 1 MiB response bound, and a bounded
+  event history on the adapter-owned Ara WebSocket. Event replay/retention gaps are
+  explicit and reconciled by current-state REST tools; no unbound WebSocket is opened.
 - T09 Streamable HTTP MCP endpoint at `/mcp` using the shared tool server, SDK
   bearer authentication, Origin protection, TLS for non-loopback binds, structured
   Chi request logging/recovery, HTTP metrics/traces, bounded requests, and graceful

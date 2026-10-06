@@ -27,6 +27,31 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
+func TestControlManagerRetainsBoundedDeduplicatedAraEvents(t *testing.T) {
+	manager, err := NewControlManager(nil, nil, "test", "stdio", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.stop)
+	manager.mu.Lock()
+	manager.phase = "owned"
+	manager.socketActive = true
+	heartbeat := time.Now().UTC()
+	manager.lastHeartbeat = &heartbeat
+	manager.mu.Unlock()
+	for seq := int64(1); seq <= maxRecentEvents+1; seq++ {
+		manager.recordEvent(ara.WebSocketEvent{Type: "sequence.progress", Seq: seq, SequenceID: "seq-1", State: "running", InstructionsCompleted: int(seq), InstructionsTotal: maxRecentEvents + 1})
+	}
+	manager.recordEvent(ara.WebSocketEvent{Type: "sequence.progress", Seq: maxRecentEvents, SequenceID: "seq-1"})
+	snapshot := manager.RecentEvents()
+	if !snapshot.Available || snapshot.Stale || !snapshot.Gap || snapshot.Dropped != 1 || snapshot.LastSequence != maxRecentEvents+1 || len(snapshot.Events) != maxRecentEvents {
+		t.Fatalf("event snapshot = %+v", snapshot)
+	}
+	if snapshot.Events[0].Seq != 2 || snapshot.Events[len(snapshot.Events)-1].Seq != maxRecentEvents+1 {
+		t.Fatalf("retained sequence range = %d..%d", snapshot.Events[0].Seq, snapshot.Events[len(snapshot.Events)-1].Seq)
+	}
+}
+
 func TestReadControlIdentityUsesActiveProfileListWhenServerStateOmitsID(t *testing.T) {
 	const profileID = "e1d64755-e2ae-46f1-aa43-c6e67419e1e9"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

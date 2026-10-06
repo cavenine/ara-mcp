@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,9 @@ const (
 	maxMutationLedgerBytes   = 1 << 20
 	mutationReceiptBudget    = 512 // Includes receipt metadata, entry, and channel overhead.
 	maxIntentWaiters         = 4
+	maxRecentEvents          = 128
+	maxRecentEventBytes      = 1 << 20
+	recentEventMetadataBytes = 2176 // Struct overhead plus the maximum size of bounded event strings.
 )
 
 // MutationKind selects the adapter admission policy for a mutating request.
@@ -136,6 +140,7 @@ type controlMetrics struct {
 	heartbeats metric.Int64Counter
 	mutations  metric.Int64Counter
 	replays    metric.Int64Counter
+	events     metric.Int64Counter
 }
 
 // ControlStatus exposes ownership and socket health without the Ara session
@@ -145,6 +150,21 @@ type ControlStatus struct {
 	WebSocketState     string     `json:"websocket_state"`
 	LastHeartbeat      *time.Time `json:"last_heartbeat"`
 	LastReconciliation *time.Time `json:"last_reconciliation"`
+	LastEvent          *time.Time `json:"last_event"`
+	LastEventSequence  int64      `json:"last_event_sequence"`
+	EventGap           bool       `json:"event_gap"`
+	EventBacklog       int        `json:"event_backlog"`
+	DroppedEvents      int64      `json:"dropped_events"`
+}
+
+// EventSnapshot is an immutable bounded view of the current control event buffer.
+type EventSnapshot struct {
+	Available    bool                 `json:"available"`
+	Stale        bool                 `json:"stale"`
+	Gap          bool                 `json:"gap"`
+	LastSequence int64                `json:"last_sequence"`
+	Dropped      int64                `json:"dropped"`
+	Events       []ara.WebSocketEvent `json:"events"`
 }
 
 // BeginControlResult contains the local capability returned by begin_control.
@@ -188,6 +208,12 @@ type ControlManager struct {
 	closed               bool
 	changed              chan struct{}
 	metrics              controlMetrics
+	events               []ara.WebSocketEvent
+	eventBytes           int
+	lastEventAt          *time.Time
+	lastEventSequence    int64
+	droppedEvents        int64
+	eventGap             bool
 }
 
 // NewControlManager creates the process-local cooperative controller.
@@ -244,6 +270,9 @@ func newControlMetrics(meter metric.Meter) (controlMetrics, error) {
 	}
 	if metrics.replays, err = meter.Int64Counter("ara.control.mutation.replays", metric.WithUnit("{replay}"), metric.WithDescription("Mutation intents replayed without another Ara dispatch")); err != nil {
 		return controlMetrics{}, fmt.Errorf("create Ara mutation replay counter: %w", err)
+	}
+	if metrics.events, err = meter.Int64Counter("ara.events.processed", metric.WithUnit("{event}"), metric.WithDescription("Ara WebSocket events processed by bounded category")); err != nil {
+		return controlMetrics{}, fmt.Errorf("create Ara event counter: %w", err)
 	}
 	return metrics, nil
 }
@@ -426,6 +455,12 @@ func (m *ControlManager) Begin(ctx context.Context, requestID string) (result Be
 	m.connectionStop = connectionStop
 	m.connectionDone = connectionDone
 	m.lastHeartbeat = nil
+	m.events = nil
+	m.eventBytes = 0
+	m.lastEventAt = nil
+	m.lastEventSequence, _ = strconv.ParseInt(identity.resumeToken, 10, 64)
+	m.droppedEvents = 0
+	m.eventGap = false
 	reconciled := time.Now().UTC()
 	m.lastReconciliation = &reconciled
 	m.socketActive = true
@@ -592,7 +627,7 @@ func (m *ControlManager) Snapshot() ControlStatus {
 	case "ending":
 		ownership, websocketState = "releasing", "closing"
 	}
-	status := ControlStatus{ControlOwnership: ownership, WebSocketState: websocketState}
+	status := ControlStatus{ControlOwnership: ownership, WebSocketState: websocketState, LastEventSequence: m.lastEventSequence, EventGap: m.eventGap, EventBacklog: len(m.events), DroppedEvents: m.droppedEvents}
 	if m.lastHeartbeat != nil {
 		last := *m.lastHeartbeat
 		status.LastHeartbeat = &last
@@ -601,7 +636,30 @@ func (m *ControlManager) Snapshot() ControlStatus {
 		last := *m.lastReconciliation
 		status.LastReconciliation = &last
 	}
+	if m.lastEventAt != nil {
+		last := *m.lastEventAt
+		status.LastEvent = &last
+	}
 	return status
+}
+
+// RecentEvents returns retained event metadata, never image or FITS bodies.
+func (m *ControlManager) RecentEvents() EventSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	available := m.phase == "owned" || m.phase == "reconnecting"
+	stale := !m.socketActive || m.lastHeartbeat == nil || time.Since(*m.lastHeartbeat) > time.Minute
+	events := make([]ara.WebSocketEvent, len(m.events))
+	for i, event := range m.events {
+		if event.CurrentInstructionIndex != nil {
+			event.CurrentInstructionIndex = new(*event.CurrentInstructionIndex)
+		}
+		if event.FailedInstructionIndex != nil {
+			event.FailedInstructionIndex = new(*event.FailedInstructionIndex)
+		}
+		events[i] = event
+	}
+	return EventSnapshot{Available: available, Stale: stale, Gap: m.eventGap, LastSequence: m.lastEventSequence, Dropped: m.droppedEvents, Events: events}
 }
 
 // Require rejects mutations unless the caller presents the live phase ID.
@@ -929,7 +987,7 @@ func (m *ControlManager) maintainConnection(ctx context.Context, connection *web
 		m.mu.Unlock()
 	}()
 	for current := connection; ; {
-		_ = m.client.MaintainControlWebSocket(ctx, current, func(at time.Time) {
+		_ = m.client.MaintainControlWebSocketWithEvents(ctx, current, func(at time.Time) {
 			m.mu.Lock()
 			if m.connection == current && m.phase == "owned" {
 				last := at
@@ -939,7 +997,7 @@ func (m *ControlManager) maintainConnection(ctx context.Context, connection *web
 			m.mu.Unlock()
 		}, func() {
 			m.logger.WarnContext(ctx, "Ara control takeover rejected", "service", "ara-mcp", "version", m.version, "component", "control", "event", "control_takeover_rejected", "transport", m.transport, "request_id", m.controlRequestID(current))
-		})
+		}, m.recordEvent)
 		if ctx.Err() != nil || !m.markConnectionLost(current) {
 			return
 		}
@@ -949,6 +1007,67 @@ func (m *ControlManager) maintainConnection(ctx context.Context, connection *web
 			return
 		}
 		current = reconnected
+	}
+}
+
+func (m *ControlManager) recordEvent(event ara.WebSocketEvent) {
+	size := recentEventMetadataBytes
+	m.mu.Lock()
+	if event.Gap {
+		m.eventGap = true
+		if event.Seq > m.lastEventSequence {
+			m.droppedEvents++
+			m.lastEventSequence = event.Seq
+			now := time.Now().UTC()
+			m.lastEventAt = &now
+		}
+		m.mu.Unlock()
+		m.metrics.events.Add(context.Background(), 1, metric.WithAttributes(attribute.String("category", "recovery"), attribute.String("outcome", "gap")))
+		return
+	}
+	if event.Seq <= m.lastEventSequence {
+		m.mu.Unlock()
+		return
+	}
+	if m.lastEventSequence > 0 && event.Seq > m.lastEventSequence+1 {
+		m.eventGap = true
+		m.droppedEvents += event.Seq - m.lastEventSequence - 1
+	}
+	m.lastEventSequence = event.Seq
+	now := time.Now().UTC()
+	m.lastEventAt = &now
+	if size > maxRecentEventBytes {
+		m.droppedEvents++
+		m.eventGap = true
+		m.mu.Unlock()
+		m.metrics.events.Add(context.Background(), 1, metric.WithAttributes(attribute.String("category", eventCategory(event.Type)), attribute.String("outcome", "oversize")))
+		return
+	}
+	m.events = append(m.events, event)
+	m.eventBytes += size
+	for len(m.events) > maxRecentEvents || m.eventBytes > maxRecentEventBytes {
+		m.eventBytes -= recentEventMetadataBytes
+		m.events[0] = ara.WebSocketEvent{}
+		m.events = m.events[1:]
+		m.droppedEvents++
+		m.eventGap = true
+	}
+	m.mu.Unlock()
+	m.metrics.events.Add(context.Background(), 1, metric.WithAttributes(attribute.String("category", eventCategory(event.Type)), attribute.String("outcome", "processed")))
+}
+
+func eventCategory(eventType string) string {
+	switch {
+	case strings.HasPrefix(eventType, "sequence."):
+		return "sequence"
+	case strings.HasPrefix(eventType, "equipment.") || strings.HasPrefix(eventType, "camera."):
+		return "equipment"
+	case strings.HasPrefix(eventType, "autofocus.") || strings.HasPrefix(eventType, "session.") || strings.HasPrefix(eventType, "calibration."):
+		return "job"
+	case strings.HasPrefix(eventType, "frame."):
+		return "frame"
+	default:
+		return "other"
 	}
 }
 
@@ -1088,7 +1207,14 @@ func (m *ControlManager) reconnectControlSession(ctx context.Context, oldConnect
 					var connection *websocket.Conn
 					connection, reclaimErr = m.client.OpenControlWebSocket(recoveryContext, reclaimed)
 					if reclaimErr == nil {
-						reclaimErr = m.client.ResumeControlWebSocket(recoveryContext, connection, current.resumeToken)
+						m.mu.Lock()
+						resumeCursor := m.lastEventSequence
+						m.mu.Unlock()
+						resumeToken := current.resumeToken
+						if resumeCursor > 0 {
+							resumeToken = strconv.FormatInt(resumeCursor, 10)
+						}
+						reclaimErr = m.client.ResumeControlWebSocket(recoveryContext, connection, resumeToken)
 					}
 					if reclaimErr == nil {
 						m.mu.Lock()

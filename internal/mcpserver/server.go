@@ -121,6 +121,7 @@ func New(options Options) (*mcp.Server, error) {
 		result, err := getSequence(ctx, options.Ara, input.SequenceID)
 		return result, err
 	})
+	registerProgressTools(server, instrumentation, options.Ara)
 	addTool(server, instrumentation, &mcp.Tool{
 		Name:        "get_adapter_diagnostics",
 		Description: "Read local adapter health and resource diagnostics without changing Ara state.",
@@ -132,6 +133,12 @@ func New(options Options) (*mcp.Server, error) {
 	registerSequenceExecutionTools(server, instrumentation, options.Ara, options.Control)
 	registerManualEquipmentTools(server, instrumentation, options.Ara, options.Control)
 	if options.Control != nil {
+		addTool(server, instrumentation, &mcp.Tool{
+			Name: "get_recent_ara_events", Description: "Read the bounded event history from this adapter-owned Ara control socket; outside control use the sequence, job, and frame REST readers.",
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
+		}, func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (EventSnapshot, error) {
+			return options.Control.RecentEvents(), nil
+		})
 		registerSequenceMutationTools(server, instrumentation, options.Ara, options.Control)
 		addTool(server, instrumentation, &mcp.Tool{
 			Name:        "begin_control",
@@ -442,6 +449,11 @@ type AdapterDiagnostics struct {
 	WebSocketState         string            `json:"websocket_state"`
 	LastHeartbeat          *time.Time        `json:"last_heartbeat"`
 	LastReconciliation     *time.Time        `json:"last_reconciliation"`
+	LastAraEvent           *time.Time        `json:"last_ara_event"`
+	LastAraEventSequence   int64             `json:"last_ara_event_sequence"`
+	AraEventGap            bool              `json:"ara_event_gap"`
+	AraEventBacklog        int               `json:"ara_event_backlog"`
+	AraEventsDropped       int64             `json:"ara_events_dropped"`
 	ControlOwnership       string            `json:"control_ownership"`
 	TelemetryOutputs       []string          `json:"telemetry_outputs"`
 	Runtime                map[string]string `json:"runtime"`
@@ -644,6 +656,12 @@ func getAdapterDiagnostics(ctx context.Context, options Options, health *araHeal
 		control := options.Control.Snapshot()
 		result.WebSocketState = control.WebSocketState
 		result.LastHeartbeat = control.LastHeartbeat
+		result.LastReconciliation = control.LastReconciliation
+		result.LastAraEvent = control.LastEvent
+		result.LastAraEventSequence = control.LastEventSequence
+		result.AraEventGap = control.EventGap
+		result.AraEventBacklog = control.EventBacklog
+		result.AraEventsDropped = control.DroppedEvents
 		result.ControlOwnership = control.ControlOwnership
 	}
 	return result, nil

@@ -19,8 +19,9 @@ tools, T06's sequence-execution tools, T07's manual camera/mount/focuser/filter-
 actions, T09's authenticated Streamable HTTP MCP endpoint, and T13's optional
 diagnostics HTTP listener are implemented. HTTP protocol and concurrent-session
 behavior are tested with the official MCP Go SDK v1.8.0 client; no third-party host
-compatibility is claimed. Job monitoring, image retrieval, resource dashboard/exports,
-and a release are not available yet.
+compatibility is claimed. T08 job/frame readers, bounded image thumbnails, and
+owned-session event monitoring are implemented. Resource dashboard/exports and a
+release are not available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
 context, saved sequence pages/details, sequence templates, validation results, and
@@ -101,6 +102,13 @@ and [SBC validation](docs/development.md#small-sbc-validation).
   validation. Neither validation confirms rig compatibility or readiness.
 - `get_sequence_state`: read Ara's current run state; a missing in-memory state is not
   evidence of completion.
+- `get_job_status`, `list_frames`, `get_frame`, and `get_frame_preview`: inspect
+  ephemeral Ara jobs and the saved frame catalog; previews return JPEG image content
+  capped at 1 MiB. Ara may return a placeholder when its catalogued FITS file is absent.
+- `get_recent_ara_events`: inspect up to 128 / 1 MiB of events from the adapter-owned
+  Ara session socket. Expired replay or buffer overflow is reported as a gap; read
+  current sequence/job/frame state through the REST tools to reconcile. Without an
+  owned control session, event streaming is unavailable and the tools use REST.
 - `get_adapter_diagnostics`: Ara reachability and local process/runtime sample.
 
 ## Sequence-authoring tools
@@ -167,14 +175,14 @@ limits.
   active or paused sequence is reported. Mount abort, exposure abort, and emergency
   stop use the reserved interrupt lane.
 - Accepted operations remain accepted, not completed. Exposures return Ara's frame
-  ID and autofocus returns its job ID; MCP frame/job readers arrive with T08.
+  ID and autofocus returns its job ID; `get_job_status` and frame readers expose
+  Ara's corresponding ephemeral job/frame results.
 The T07 routes are source-verified and covered by fake-Ara/MCP contract tests against
 the pinned Ara master commit `6374eede73383851486e6fb498a3311a3be58d82`. They have
 not been exercised against a live daemon or physical equipment.
 
 ## Planned capabilities
 
-- Retrieve image previews and operation results.
 - Monitor the application's own CPU/memory/goroutine and related usage on a
   self-hosted, automatically updating SSE dashboard.
 - Download retained resource statistics as CSV or JSONL files.

@@ -44,13 +44,15 @@ type Client struct{ gateway *httpGateway }
 // request describes an Ara route. Route is a template such as
 // "/sequences/{id}"; PathParams supplies values for its placeholders.
 type request struct {
-	Method         string
-	Route          string
-	PathParams     map[string]string
-	Query          map[string][]string
-	Body           []byte
-	IdempotencyKey string
-	RequestID      string
+	Method           string
+	Route            string
+	PathParams       map[string]string
+	Query            map[string][]string
+	Body             []byte
+	IdempotencyKey   string
+	RequestID        string
+	RawResponse      bool
+	MaxResponseBytes int
 }
 
 // Page is Ara's cursor-page wire envelope. Cursors remain opaque to the client.
@@ -120,7 +122,16 @@ func (c *Client) do(ctx context.Context, request request, response any) (Result,
 	if ctx == nil {
 		return Result{Outcome: OutcomeFailed}, errors.New("ara request: context is required")
 	}
-	exchange, err := c.gateway.do(ctx, request, response)
+	target := response
+	if request.RawResponse {
+		target = nil
+	}
+	exchange, err := c.gateway.do(ctx, request, target)
+	if err == nil && request.RawResponse {
+		if body, ok := response.(*[]byte); ok {
+			*body = append((*body)[:0], exchange.body...)
+		}
+	}
 	return exchange.result, err
 }
 
