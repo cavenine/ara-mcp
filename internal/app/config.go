@@ -32,6 +32,7 @@ type Config struct {
 	DiagnosticsListen        string        `mapstructure:"diagnostics-listen"`
 	DiagnosticsUsername      string        `mapstructure:"diagnostics-username"`
 	DiagnosticsPassword      string        `mapstructure:"diagnostics-password"`
+	DiagnosticsPprof         bool          `mapstructure:"diagnostics-pprof"`
 	DiagnosticsTLSCert       string        `mapstructure:"diagnostics-tls-cert"`
 	DiagnosticsTLSKey        string        `mapstructure:"diagnostics-tls-key"`
 	ResourceSampleInterval   time.Duration `mapstructure:"resource-sample-interval"`
@@ -48,7 +49,7 @@ func LoadConfig(flags *pflag.FlagSet, configFile string) (Config, error) {
 	v.SetEnvPrefix("ARA_MCP")
 	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	v.AutomaticEnv()
-	for _, key := range []string{"ara-url", "transport", "log-level", "timeout", "read-retries", "http-listen", "http-bearer-token", "http-origins", "http-tls-cert", "http-tls-key", "diagnostics-listen", "diagnostics-username", "diagnostics-password", "diagnostics-tls-cert", "diagnostics-tls-key", "resource-sample-interval", "resource-history-samples", "resource-history-age", "dashboard-subscriber-limit", "resource-export-limit", "resource-archive-dir"} {
+	for _, key := range []string{"ara-url", "transport", "log-level", "timeout", "read-retries", "http-listen", "http-bearer-token", "http-origins", "http-tls-cert", "http-tls-key", "diagnostics-listen", "diagnostics-username", "diagnostics-password", "diagnostics-pprof", "diagnostics-tls-cert", "diagnostics-tls-key", "resource-sample-interval", "resource-history-samples", "resource-history-age", "dashboard-subscriber-limit", "resource-export-limit", "resource-archive-dir"} {
 		if err := v.BindEnv(key); err != nil {
 			return Config{}, fmt.Errorf("bind %s environment variable: %w", key, err)
 		}
@@ -65,6 +66,7 @@ func LoadConfig(flags *pflag.FlagSet, configFile string) (Config, error) {
 	v.SetDefault("read-retries", 0)
 	v.SetDefault("http-listen", "127.0.0.1:8080")
 	v.SetDefault("diagnostics-listen", "")
+	v.SetDefault("diagnostics-pprof", false)
 	defaults := monitor.DefaultSamplerConfig()
 	v.SetDefault("resource-sample-interval", defaults.Interval)
 	v.SetDefault("resource-history-samples", defaults.HistorySamples)
@@ -141,7 +143,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("HTTP origins must be absolute http(s) origins without paths or credentials")
 		}
 	}
-	if err := (diagnostics.Access{Listen: c.DiagnosticsListen, Username: c.DiagnosticsUsername, Password: c.DiagnosticsPassword, TLSCert: c.DiagnosticsTLSCert, TLSKey: c.DiagnosticsTLSKey}).Validate(); err != nil {
+	if err := (diagnostics.Access{Listen: c.DiagnosticsListen, Username: c.DiagnosticsUsername, Password: c.DiagnosticsPassword, TLSCert: c.DiagnosticsTLSCert, TLSKey: c.DiagnosticsTLSKey, Pprof: c.DiagnosticsPprof}).Validate(); err != nil {
 		return err
 	}
 	return nil

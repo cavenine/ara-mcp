@@ -6,11 +6,14 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -76,26 +79,60 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 	if sessionInfo.Connected {
 		t.Skip("Ara already has a control-session owner; leaving it undisturbed")
 	}
-	control, err := NewControlManager(client, slog.New(slog.NewTextHandler(io.Discard, nil)), "integration", "stdio", nil, nil)
+	var control *ControlManager
+	var serverSession *mcp.ServerSession
+	var clientSession *mcp.ClientSession
+	var stdioCommand *exec.Cmd
+	var stdioStderr *bytes.Buffer
+	liveMCPURL := os.Getenv("ARA_MCP_LIVE_MCP_URL")
+	liveMCPToken := os.Getenv("ARA_MCP_LIVE_MCP_TOKEN")
+	restartHost := os.Getenv("ARA_MCP_LIVE_SYSTEMD_RESTART_HOST")
+	if restartHost != "" && liveMCPURL == "" {
+		t.Fatal("ARA_MCP_LIVE_SYSTEMD_RESTART_HOST requires ARA_MCP_LIVE_MCP_URL")
+	}
+	if liveMCPURL != "" {
+		if liveMCPToken == "" {
+			t.Fatal("set ARA_MCP_LIVE_MCP_TOKEN when ARA_MCP_LIVE_MCP_URL is set")
+		}
+		clientSession, err = connectLiveHTTP(t.Context(), liveMCPURL, liveMCPToken)
+	} else if os.Getenv("ARA_MCP_LIVE_MCP_STDIO") != "" {
+		stdioCommand, stdioStderr, clientSession = startLiveStdioSession(t, baseURL)
+	} else {
+		control, err = NewControlManager(client, slog.New(slog.NewTextHandler(io.Discard, nil)), "integration", "stdio", nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server, err := New(Options{Ara: client, Control: control, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		clientTransport, serverTransport := mcp.NewInMemoryTransports()
+		serverSession, err = server.Connect(t.Context(), serverTransport, nil)
+		if err == nil {
+			clientSession, err = mcp.NewClient(&mcp.Implementation{Name: "t06-live-check", Version: "1"}, nil).
+				Connect(t.Context(), clientTransport, nil)
+		}
+	}
 	if err != nil {
+		if stdioCommand != nil && stdioCommand.Process != nil {
+			_ = stdioCommand.Process.Kill()
+			_ = stdioCommand.Wait()
+		}
 		t.Fatal(err)
 	}
-	server, err := New(Options{Ara: client, Control: control, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer serverSession.Close()
-	clientSession, err := mcp.NewClient(&mcp.Implementation{Name: "t06-live-check", Version: "1"}, nil).
-		Connect(t.Context(), clientTransport, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer clientSession.Close()
+	defer func() {
+		if clientSession != nil {
+			_ = clientSession.Close()
+		}
+		if serverSession != nil {
+			_ = serverSession.Close()
+		}
+		if stdioCommand != nil {
+			if err := stdioCommand.Wait(); err != nil {
+				t.Errorf("live stdio adapter exited: %v; stderr=%s", err, stdioStderr.String())
+			}
+		}
+	}()
 
 	controlID := ""
 	sequenceID := ""
@@ -103,8 +140,37 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
+		if controlID == "" {
+			if control != nil {
+				begin, err := control.Begin(cleanup, "live-t06-cleanup-begin")
+				if err != nil {
+					t.Errorf("begin control for live T06 cleanup: %v", err)
+				} else {
+					controlID = begin.ControlID
+				}
+			} else if clientSession != nil {
+				result, err := clientSession.CallTool(cleanup, &mcp.CallToolParams{Name: "begin_control", Arguments: json.RawMessage(`{}`)})
+				if err != nil || result.IsError {
+					t.Errorf("begin control for live T10 cleanup: result=%#v err=%v", result, err)
+				} else if encoded, marshalErr := json.Marshal(result.StructuredContent); marshalErr != nil {
+					t.Errorf("encode live T10 cleanup control result: %v", marshalErr)
+				} else {
+					var begin struct {
+						ControlID string `json:"control_id"`
+					}
+					if err := json.Unmarshal(encoded, &begin); err != nil {
+						t.Errorf("decode live T10 cleanup control result: %v", err)
+					} else {
+						controlID = begin.ControlID
+					}
+				}
+			}
+		}
+		if controlID != "" && clientSession == nil {
+			t.Error("cannot reconcile live simulator work without an MCP client session")
+		}
 		if controlID != "" {
-			if sequenceID != "" {
+			if sequenceID != "" && clientSession != nil {
 				if stateResult, callErr := clientSession.CallTool(cleanup, &mcp.CallToolParams{
 					Name: "get_sequence_state", Arguments: json.RawMessage(`{"sequence_id":"` + sequenceID + `"}`),
 				}); callErr == nil && !stateResult.IsError {
@@ -117,11 +183,20 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 					}
 				}
 			}
-			if err := control.End(cleanup, controlID, "live-t06-cleanup-end"); err != nil {
-				t.Errorf("release live T06 control session: %v", err)
-			}
-			if err := control.Close(cleanup, "live-t06-cleanup-close"); err != nil {
-				t.Errorf("close live T06 control manager: %v", err)
+			if control != nil {
+				if err := control.End(cleanup, controlID, "live-t06-cleanup-end"); err != nil {
+					t.Errorf("release live T06 control session: %v", err)
+				}
+				if err := control.Close(cleanup, "live-t06-cleanup-close"); err != nil {
+					t.Errorf("close live T06 control manager: %v", err)
+				}
+			} else if clientSession != nil {
+				result, err := clientSession.CallTool(cleanup, &mcp.CallToolParams{
+					Name: "end_control", Arguments: json.RawMessage(`{"control_id":"` + controlID + `"}`),
+				})
+				if err != nil || result.IsError {
+					t.Errorf("release live T10 HTTP control session: result=%#v err=%v", result, err)
+				}
 			}
 		}
 		for _, id := range sequenceIDs {
@@ -151,6 +226,16 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 		t.Fatalf("create_sequence omitted sequence_id: %#v", created)
 	}
 	sequenceIDs = append(sequenceIDs, sequenceID)
+	readBack := liveCallTool(t, clientSession, "get_sequence", `{"sequence_id":"`+sequenceID+`"}`)
+	if liveString(readBack, "id") != sequenceID {
+		t.Fatalf("get_sequence returned ID %q, want saved ID %q", liveString(readBack, "id"), sequenceID)
+	}
+	missing, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{
+		Name: "get_sequence", Arguments: json.RawMessage(`{"sequence_id":"ara-mcp-t10-missing-sequence"}`),
+	})
+	if err != nil || !missing.IsError {
+		t.Fatalf("missing-sequence read = %#v, err=%v; want MCP tool error", missing, err)
+	}
 	started := liveCallTool(t, clientSession, "start_sequence", `{"control_id":"`+controlID+`","intent_id":"ara-mcp-t06-omnisim-start","sequence_id":"`+sequenceID+`"}`)
 	var execution SequenceExecutionResult
 	decodeLiveContent(t, started, &execution)
@@ -196,6 +281,68 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 
 	startLiveSequence(t, clientSession, controlID, sequenceID, "ara-mcp-t06-omnisim-lifecycle-start-1")
 	runID := waitForLiveRunState(t, clientSession, sequenceID, "running", 15*time.Second)
+	if restartHost != "" {
+		_ = clientSession.Close()
+		clientSession = nil
+		restartCtx, cancelRestart := context.WithTimeout(t.Context(), 20*time.Second)
+		restart := exec.CommandContext(restartCtx, "ssh", "-o", "BatchMode=yes", restartHost, "sudo", "systemctl", "restart", "ara-mcp.service")
+		output, err := restart.CombinedOutput()
+		cancelRestart()
+		if err != nil {
+			clientSession, _ = connectLiveHTTP(t.Context(), liveMCPURL, liveMCPToken)
+			t.Fatalf("restart live systemd adapter: %v: %s", err, output)
+		}
+		controlID = ""
+		reconnectCtx, cancelReconnect := context.WithTimeout(t.Context(), 20*time.Second)
+		defer cancelReconnect()
+		for {
+			clientSession, err = connectLiveHTTP(reconnectCtx, liveMCPURL, liveMCPToken)
+			if err == nil {
+				break
+			}
+			select {
+			case <-reconnectCtx.Done():
+				t.Fatalf("reconnect to systemd service: %v", err)
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+		begin = liveCallTool(t, clientSession, "begin_control", `{}`)
+		controlID = liveString(begin, "control_id")
+		continued := liveCallTool(t, clientSession, "get_sequence_state", `{"sequence_id":"`+sequenceID+`"}`)
+		continuedState, continuedRunID := liveRunIdentity(continued)
+		if controlID == "" || !activeRunState(continuedState) || continuedRunID != runID {
+			t.Fatalf("Ara run after systemd restart = %q/%q, control ID present=%t; want active run %q and fresh control", continuedState, continuedRunID, controlID != "", runID)
+		}
+	}
+	if stdioCommand != nil {
+		controlID = ""
+		if err := clientSession.Close(); err != nil {
+			t.Fatalf("close stdio client during active simulator run: %v", err)
+		}
+		clientSession = nil
+		if err := stdioCommand.Wait(); err != nil {
+			t.Fatalf("stop stdio adapter during active simulator run: %v; stderr=%s", err, stdioStderr.String())
+		}
+		stdioCommand = nil
+		sessionInfo, _, err := client.GetServerSessionWithRequestID(t.Context(), "live-t10-after-adapter-close")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sessionInfo.Connected {
+			t.Fatal("Ara still reports the adapter control session after stdio shutdown")
+		}
+		stdioCommand, stdioStderr, clientSession = startLiveStdioSession(t, baseURL)
+		begin = liveCallTool(t, clientSession, "begin_control", `{}`)
+		controlID = liveString(begin, "control_id")
+		if controlID == "" {
+			t.Fatalf("reconnected begin_control omitted control_id: %#v", begin)
+		}
+		stateResult := liveCallTool(t, clientSession, "get_sequence_state", `{"sequence_id":"`+sequenceID+`"}`)
+		continuedState, continuedRunID := liveRunIdentity(stateResult)
+		if !activeRunState(continuedState) || continuedRunID != runID {
+			t.Fatalf("Ara run after stdio adapter restart = %q/%q, want active run %q", continuedState, continuedRunID, runID)
+		}
+	}
 	paused := liveCallTool(t, clientSession, "pause_sequence", `{"control_id":"`+controlID+`","intent_id":"ara-mcp-t06-omnisim-pause","sequence_id":"`+sequenceID+`","expected_run_id":"`+runID+`"}`)
 	assertLiveAccepted(t, paused, "pause_sequence")
 	waitForLiveRunState(t, clientSession, sequenceID, "paused", 15*time.Second)
@@ -211,6 +358,81 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 	aborted := liveCallTool(t, clientSession, "abort_sequence", `{"control_id":"`+controlID+`","intent_id":"ara-mcp-t06-omnisim-abort","sequence_id":"`+sequenceID+`","expected_run_id":"`+secondRunID+`"}`)
 	assertLiveAccepted(t, aborted, "abort_sequence")
 	waitForLiveRunState(t, clientSession, sequenceID, "stopped", 15*time.Second)
+
+	capture := liveCallTool(t, clientSession, "capture_exposure", `{"control_id":"`+controlID+`","intent_id":"ara-mcp-t10-omnisim-exposure","exposure_sec":0.1,"bin_x":1,"bin_y":1}`)
+	var captureResult EquipmentActionResult
+	decodeLiveContent(t, capture, &captureResult)
+	if captureResult.Mutation.Outcome != ara.OutcomeAccepted || captureResult.Frame.FrameID == "" {
+		t.Fatalf("capture_exposure result = %#v; want accepted simulator frame", captureResult)
+	}
+	previewCtx, cancelPreview := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancelPreview()
+	for {
+		preview, err := clientSession.CallTool(previewCtx, &mcp.CallToolParams{
+			Name: "get_frame_preview", Arguments: json.RawMessage(`{"frame_id":"` + captureResult.Frame.FrameID + `"}`),
+		})
+		if err == nil && !preview.IsError {
+			var image *mcp.ImageContent
+			for _, content := range preview.Content {
+				if candidate, ok := content.(*mcp.ImageContent); ok {
+					image = candidate
+					break
+				}
+			}
+			if image == nil || image.MIMEType != "image/jpeg" || len(image.Data) < 2 || len(image.Data) > 1<<20 || image.Data[0] != 0xff || image.Data[1] != 0xd8 {
+				t.Fatalf("get_frame_preview content = %#v; want bounded JPEG image", preview.Content)
+			}
+			t.Logf("live simulator JPEG preview size = %d bytes", len(image.Data))
+			break
+		}
+		select {
+		case <-previewCtx.Done():
+			t.Fatalf("simulated frame preview did not become available: %v", previewCtx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+type liveBearerTransport struct{ token string }
+
+func connectLiveHTTP(ctx context.Context, endpoint, token string) (*mcp.ClientSession, error) {
+	return mcp.NewClient(&mcp.Implementation{Name: "t10-live-http-check", Version: "1"}, nil).
+		Connect(ctx, &mcp.StreamableClientTransport{
+			Endpoint:   endpoint,
+			HTTPClient: &http.Client{Transport: liveBearerTransport{token: token}},
+		}, nil)
+}
+
+func startLiveStdioSession(t *testing.T, baseURL string) (*exec.Cmd, *bytes.Buffer, *mcp.ClientSession) {
+	t.Helper()
+	command := exec.CommandContext(t.Context(), "go", "run", "../../cmd/ara-mcp", "--ara-url", baseURL, "serve")
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := new(bytes.Buffer)
+	command.Stderr = stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "t10-live-stdio-check", Version: "1"}, nil).
+		Connect(t.Context(), &mcp.IOTransport{Reader: stdout, Writer: stdin}, nil)
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		t.Fatalf("connect live stdio client: %v; stderr=%s", err, stderr.String())
+	}
+	return command, stderr, session
+}
+
+func (transport liveBearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	request = request.Clone(request.Context())
+	request.Header.Set("Authorization", "Bearer "+transport.token)
+	return http.DefaultTransport.RoundTrip(request)
 }
 
 func liveCallTool(t *testing.T, session *mcp.ClientSession, name, arguments string) map[string]any {

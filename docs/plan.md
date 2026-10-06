@@ -118,8 +118,8 @@ requires implemented deliverables and recorded verification, not merely a design
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Complete — Ara client/tool contracts, capability/run preflight, interrupt lane, fake-Ara/MCP tests, and repository checks passed; no live-device claim | T04, T06 |
 | T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Implemented; contract tests pass, live T08 daemon check remains pending | T06, T07 |
 | T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Complete — authenticated SDK transport, committed-header fault accounting, and independent concurrent sessions verified with SDK v1.8.0; no named third-party host or target-board claim | T03, T04, T13 |
-| T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Complete — bounded sampler/history, local Datastar page/SSE, live/archive CSV/JSONL exports, config limits, range/gap reporting, and browser smoke verified; T10 still owns target-board and remote-deployment evidence | T03, T13 |
-| T10 | [Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation) | Pending | T05–T09, T12, T13 |
+| T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Complete — bounded sampler/history, local Datastar page/SSE, live/archive CSV/JSONL exports, config limits, range/gap reporting, and browser smoke verified; T10 records RPi4 load and remote TLS checks | T03, T13 |
+| T10 | [Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation) | Complete for the measured RPi4/OmniSim deployment: systemd, live stdio/HTTP, active-run recovery, pprof, remote TLS browser, and bounded resource stress verified. Pi 3/physical/trusted-CA claims are excluded; O5 records remaining resource limits. | T05–T09, T12, T13 |
 | T11 | [First release preparation](#t11-first-release-preparation) | Pending | T10 |
 
 First milestone: T01–T03, a real read-only stdio adapter. T13/T12 can then deliver
@@ -836,6 +836,105 @@ All [dashboard acceptance criteria](resource-dashboard.md#acceptance-criteria) h
 T10 measures the feature's sustained resource cost on the intended SBC target.
 
 ### T10 Deployment and end-to-end validation
+
+**Status:** Complete for the measured RPi4/OmniSim deployment. Added [`deployment.md`](deployment.md) and a non-root
+[`ara-mcp.service`](ara-mcp.service) example with loopback defaults, persistent bounded
+archive storage, journal logging, graceful shutdown, update, rollback, and systemd
+credential-based direct TLS instructions. The unit was installed and exercised on the
+RPi4, then left enabled/running with MCP and diagnostics listeners restored to loopback.
+The live simulator flows and remote Basic-auth/TLS dashboard browser path passed, as did
+protected native profiling and the exact 1 MiB MCP image-preview test on Linux/ARM64.
+Pi 3, physical imaging, and trusted-CA/reverse-proxy support are explicitly unvalidated
+and not claimed. The at-limit dashboard CPU stress exceeded its provisional 5% busy
+target; that O5 limitation is recorded and must be considered before broader resource
+claims.
+
+**Software checks (2026-10-06):** `go test -race -shuffle=on -count=1 ./...`,
+`env -u ARA_MCP_LIVE_ARA_URL go test -tags=integration ./...`, `go vet ./...`,
+`go build ./...`, `go mod tidy -diff`, and `go mod verify` passed on Linux/amd64 in the
+uncommitted T10 working tree based on `main` commit `7674e04`; cross-builds passed for
+Linux amd64/arm64, Darwin amd64/arm64, and Windows amd64. A live
+`systemd-analyze verify /etc/systemd/system/ara-mcp.service`
+passed on the Pi; the deployed unit ran as `DynamicUser=yes` with its persistent archive
+and journal output. The checked-in `TestLiveAraSequenceStartAndStateWithPinnedOmniSim`
+passed over both the official SDK Streamable HTTP client and a local stdio process. It
+saved/read a plan, verified a missing-plan tool error, completed a short run, exercised
+pause/resume/stop/abort, and accepted one simulated camera exposure; `get_frame_preview`
+returned a 291-byte JPEG (possibly Ara's placeholder), not a maximum-size preview. Its
+stdio run also
+closed the adapter during a 1,000-iteration simulated run, restarted a fresh process,
+began a new control phase, and confirmed Ara still reported the same active run ID before
+continuing. Cleanup released Ara control and removed saved test sequences.
+With `ARA_MCP_LIVE_SYSTEMD_RESTART_HOST` set, the HTTP mode also restarted the deployed
+systemd service while that simulator run was active, reconnected, acquired a new control
+phase, and observed the same active run ID.
+`TestLiveAraControlSessionAndHeartbeat`
+also passed on the Pi: Ara heartbeat/pong, same-session socket reconnect, competing
+claim rejection (HTTP 409), and release. No telescope or physical-device operation was
+issued.
+
+**Profiling RED/GREEN:** `go test -count=1 -run
+'^TestHandlerPprofIsOptInAndRequiresBasicAuth$' ./internal/diagnostics` first failed to
+compile because `Access.Pprof` did not exist; it passed after opt-in route registration
+and credential validation. `go test -count=1 -run
+'^TestLoadConfigDiagnosticsPprofRequiresBasicAuth$' ./internal/app` first failed to
+compile because `Config.DiagnosticsPprof` was absent; config/env/flag wiring and the
+loopback auth gate made it pass. The tests prove disabled 404, unauthenticated 401,
+authenticated pprof access, and false/true configuration behavior.
+
+The `--diagnostics-pprof`/`ARA_MCP_DIAGNOSTICS_PPROF` switch is off by default and
+configuration rejects it without a diagnostics listener and Basic-auth credentials.
+`TestHandlerPprofIsOptInAndRequiresBasicAuth` checks disabled 404, unauthorized 401,
+and authenticated index/goroutine profile responses; configuration tests cover missing
+credentials/listener and flag-over-environment precedence. On the RPi4 ARM64 service,
+enabling it temporarily on loopback yielded 401 without credentials and 200 for the
+authenticated pprof index, goroutine dump, and Prometheus scrape. Restoring the service
+configuration returned `/debug/pprof/` to 404; profiling remains disabled in the active
+service configuration.
+
+**RPi4 deployment and resource evidence (2026-10-06):** Raspberry Pi 4 Model B Rev 1.5,
+Debian 13 (trixie), kernel `6.18.34+rpt-rpi-v8`, ARM64, 3.7 GiB RAM, Go 1.27.1 adapter
+build; Ara `1.0.0.0` commit `34b59e6de1d5ab0d5afe51ddb6a4206e935e3f4c` and OmniSim
+`v0.4.0`. Ara and the loopback-only simulator were active; the selected
+`ara-mcp-t06-omnisim` profile used only its simulated camera/filter wheel and disposable
+`/tmp/ara-mcp-t06-captures` path. No physical rig or plate-solving/guiding workload ran.
+System memory available was about 2.6 GiB; temperature ranged from 60.3–62.8°C during
+checks. `vcgencmd get_throttled` reported `0xe0000` (historical throttle/undervoltage/
+soft-temperature bits; current bits clear).
+
+The persistent HTTP service used a loopback MCP listener, loopback diagnostics, and
+the bounded archive under `/var/lib/ara-mcp/resources`; the environment file was
+root-owned mode `0600`. Idle sampling with one live dashboard viewer covered 56 seconds
+(19 samples): CPU median 0%, max 0.75% of one core; RSS median 21.9 MiB, max 22.0 MiB;
+Go allocation median 2.45 MiB, max 2.97 MiB; 14 goroutines. A 58-second at-limit
+dashboard/export stress (20 samples) held four unread SSE clients, rejected the fifth
+subscriber with HTTP 503, and completed 24 archive JSONL exports using two concurrent
+workers. CPU median was 5.25%, max 11.0%; RSS median 21.8 MiB, max 22.2 MiB; Go
+allocation 2.18–3.10 MiB; 15 goroutines. RSS remained well below the provisional busy
+budget; at-limit dashboard/export CPU exceeded the provisional 5% busy target. That
+stress result is recorded rather than hidden by adjusting the sample; representative
+imaging-load/default-limit review remains open. These are dashboard/simulator results,
+not a minimum-board recommendation.
+
+The exact-1-MiB MCP image-preview contract test was also cross-built and run on the Pi4:
+`TestFramePreviewReturnsMCPImageContent` passed in 0.189s with a 29,292 KiB peak test-
+process RSS. This exercises the bounded Ara-client/MCP-image path on ARM64 with a local
+fake upstream; it is not a deployed-server measurement or concurrent preview stress.
+
+Native profiling was separately enabled temporarily on that ARM64 service with
+loopback-only diagnostics and Basic auth: no-auth pprof returned 401, authenticated
+index/goroutine profiles and `/metrics` returned 200, and restoring the configuration
+returned pprof to 404. The checked-in configuration defaults profiling off; the active
+service was restored to that default. Journald returned structured startup/shutdown/tool
+records for the integration runs.
+
+For remote browser validation, diagnostics were temporarily bound to the Pi's LAN
+interface with separate Basic auth and a temporary self-signed TLS certificate loaded
+using systemd credentials. Chromium loaded the page, local Datastar asset, and live SSE
+from `https://192.168.4.44:19090/` (all 200; no third-party origins); the certificate
+was explicitly accepted in the browser. TLS/auth configuration was then removed and
+the service restored to loopback-only access. A trusted public/private CA chain and
+reverse-proxy configuration have not been tested.
 
 **Goal:** demonstrate both intended deployments with reproducible evidence.
 

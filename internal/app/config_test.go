@@ -70,7 +70,7 @@ func TestLoadConfigEnvironmentFileAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if defaults.AraURL != "http://127.0.0.1:5555" || defaults.Transport != "stdio" || defaults.LogLevel != "info" || defaults.Timeout.String() != "10s" || defaults.ReadRetries != 0 || defaults.ResourceSampleInterval != 2*time.Second || defaults.ResourceHistorySamples != 1800 || defaults.ResourceHistoryAge != time.Hour || defaults.DashboardSubscriberLimit != 4 || defaults.ResourceExportLimit != 2 {
+	if defaults.AraURL != "http://127.0.0.1:5555" || defaults.Transport != "stdio" || defaults.LogLevel != "info" || defaults.Timeout.String() != "10s" || defaults.ReadRetries != 0 || defaults.DiagnosticsPprof || defaults.ResourceSampleInterval != 2*time.Second || defaults.ResourceHistorySamples != 1800 || defaults.ResourceHistoryAge != time.Hour || defaults.DashboardSubscriberLimit != 4 || defaults.ResourceExportLimit != 2 {
 		t.Fatalf("defaults = %+v", defaults)
 	}
 }
@@ -167,5 +167,49 @@ func TestLoadConfigDiagnosticsAccess(t *testing.T) {
 				t.Fatalf("LoadConfig error = %v, wantError %t", err, test.wantError)
 			}
 		})
+	}
+}
+
+func TestLoadConfigDiagnosticsPprofRequiresBasicAuth(t *testing.T) {
+	t.Setenv("ARA_MCP_DIAGNOSTICS_LISTEN", "127.0.0.1:9090")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_PPROF", "true")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_USERNAME", "")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_PASSWORD", "")
+	if _, err := LoadConfig(pflag.NewFlagSet("test", pflag.ContinueOnError), ""); err == nil {
+		t.Fatal("pprof without Basic-auth credentials was accepted")
+	}
+
+	t.Setenv("ARA_MCP_DIAGNOSTICS_USERNAME", "operator")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_PASSWORD", "secret")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_LISTEN", "")
+	if _, err := LoadConfig(pflag.NewFlagSet("test", pflag.ContinueOnError), ""); err == nil {
+		t.Fatal("pprof without a diagnostics listener was accepted")
+	}
+	t.Setenv("ARA_MCP_DIAGNOSTICS_LISTEN", "127.0.0.1:9090")
+	config, err := LoadConfig(pflag.NewFlagSet("test", pflag.ContinueOnError), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.DiagnosticsPprof {
+		t.Fatal("enabled diagnostics pprof setting was not loaded")
+	}
+}
+
+func TestDiagnosticsPprofFlagOverridesEnvironment(t *testing.T) {
+	t.Setenv("ARA_MCP_DIAGNOSTICS_PPROF", "false")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_LISTEN", "127.0.0.1:9090")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_USERNAME", "operator")
+	t.Setenv("ARA_MCP_DIAGNOSTICS_PASSWORD", "secret")
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.Bool("diagnostics-pprof", false, "")
+	if err := flags.Parse([]string{"--diagnostics-pprof=true"}); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfig(flags, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.DiagnosticsPprof {
+		t.Fatal("explicit diagnostics pprof flag did not override false environment value")
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,10 +46,17 @@ type Access struct {
 	Password string
 	TLSCert  string
 	TLSKey   string
+	Pprof    bool
 }
 
 // Validate enforces loopback-by-default access and remote TLS/authentication.
 func (a Access) Validate() error {
+	if a.Pprof && a.Listen == "" {
+		return errors.New("diagnostics profiling requires a diagnostics listener")
+	}
+	if a.Pprof && (a.Username == "" || a.Password == "") {
+		return errors.New("diagnostics profiling requires basic authentication")
+	}
 	if (a.Username == "") != (a.Password == "") {
 		return errors.New("diagnostics username and password must be configured together")
 	}
@@ -379,6 +387,16 @@ func Handler(access Access, runtime Runtime) (http.Handler, error) {
 	})
 	if runtime.Metrics != nil {
 		router.Handle("/metrics", runtime.Metrics)
+	}
+	if access.Pprof {
+		router.Get("/debug/pprof/", pprof.Index)
+		router.Get("/debug/pprof/cmdline", pprof.Cmdline)
+		router.Get("/debug/pprof/profile", pprof.Profile)
+		router.Get("/debug/pprof/symbol", pprof.Symbol)
+		router.Get("/debug/pprof/trace", pprof.Trace)
+		for _, name := range []string{"allocs", "block", "goroutine", "heap", "mutex", "threadcreate"} {
+			router.Handle("/debug/pprof/"+name, pprof.Handler(name))
+		}
 	}
 	return router, nil
 }
