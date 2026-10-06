@@ -1,8 +1,9 @@
 # ara-mcp implementation plan
 
-**Status:** T00–T09, T12, and T13 are complete. This plan tracks delivery status and
-acceptance evidence; it is not itself an implemented capability list.
-No release version or date is assigned.
+**Status:** T00–T07 and T09–T13 are complete; T08 is implemented with live daemon
+validation still pending. T11 release preparation is complete. This plan tracks delivery
+status and acceptance evidence; it is not itself an implemented capability list. The
+planned first adapter version is `v0.1.0`; no tag or release is published.
 
 ## Table of contents
 
@@ -118,9 +119,9 @@ requires implemented deliverables and recorded verification, not merely a design
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Complete — Ara client/tool contracts, capability/run preflight, interrupt lane, fake-Ara/MCP tests, and repository checks passed; no live-device claim | T04, T06 |
 | T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Implemented; contract tests pass, live T08 daemon check remains pending | T06, T07 |
 | T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Complete — authenticated SDK transport, committed-header fault accounting, and independent concurrent sessions verified with SDK v1.8.0; no named third-party host or target-board claim | T03, T04, T13 |
-| T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Complete — bounded sampler/history, local Datastar page/SSE, live/archive CSV/JSONL exports, config limits, range/gap reporting, and browser smoke verified; T10 records RPi4 load and remote TLS checks | T03, T13 |
+| T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Complete — bounded sampler/history, local Datastar page/SSE, live/archive CSV/JSONL exports, CPU/RSS charts, and a newest-first table from the existing owned Ara event socket, including bounded equipment identity; no extra WebSocket is opened. Config limits, range/gap reporting, and browser behavior are verified; T10 records RPi4 load and remote TLS checks. | T03, T13, T08 |
 | T10 | [Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation) | Complete for the measured RPi4/OmniSim deployment: systemd, live stdio/HTTP, active-run recovery, pprof, remote TLS browser, and bounded resource stress verified. Pi 3/physical/trusted-CA claims are excluded; O5 records remaining resource limits. | T05–T09, T12, T13 |
-| T11 | [First release preparation](#t11-first-release-preparation) | Pending | T10 |
+| T11 | [First release preparation](#t11-first-release-preparation) | Complete — end-user install/configuration guide, tool reference, source/build/archive/checksum procedure, and license/source notice index added. `v0.1.0` is the planned first version; no release tag/artifacts published. Claims remain bounded to recorded Ara/OmniSim and CI evidence. | T10 |
 
 First milestone: T01–T03, a real read-only stdio adapter. T13/T12 can then deliver
 local HTTP diagnostics/dashboard/downloads before all equipment tools are complete.
@@ -996,6 +997,16 @@ establishes Pi 3/4/5 suitability or a minimum-memory recommendation.
 **Acceptance:** a fresh user can install, connect an agent in either supported mode,
 and follow the validated sequence recipe. Published capability claims match the
 tests and live evidence. Creating tags/releases remains a separately requested action.
+
+**Completion evidence (2026-10-06):** rewrote the README for end users with source
+installation, separate stdio and HTTP MCP configuration examples, operation workflow,
+Mermaid deployment diagrams, and explicit validation limits. Added the tool reference,
+license/source notice index, `v0.1.0` first-version plan, and a release procedure that
+cross-builds CI targets into archives with SHA-256 checksums. Added release notes to
+the Unreleased changelog. The artifact procedure creates only ignored local `dist/`
+files; no tag or release is created. Linux ARM64 runtime evidence is the RPi4/OmniSim
+check; other artifact targets are compile-only. No named MCP host or unsupported Ara
+version, physical rig, Pi 3, or minimum-memory support is claimed.
 
 ## Outstanding verification
 

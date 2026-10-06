@@ -39,6 +39,8 @@ claim is made. No release is available yet.
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
 [first-release-policy.md](first-release-policy.md).
+For installing and connecting an MCP client, start with the end-user
+[README](../README.md) and [tool reference](tools.md).
 The runnable command and agent configuration example are below. Ara is contacted
 only when an Ara-backed tool is called, so local diagnostics remain available while
 Ara is offline.
@@ -567,9 +569,10 @@ Local-agent targets are Linux, macOS, and Windows. Telescope-side deployment
 targets Linux ARM64 SBCs, including Raspberry Pi 3/4/5-class boards with a 64-bit OS
 and limited CPU/RAM. Go 1.27 requires macOS 13 or newer on Darwin. CI cross-builds
 Linux amd64/arm64, macOS amd64/arm64, and Windows amd64; native platform tests,
-release binaries, and a service installation example remain in
-[T10](plan.md#t10-deployment-and-end-to-end-validation). Cross-builds do not
-establish runtime or hardware support.
+and a source-build/archive/checksum procedure are documented in
+[T11](plan.md#t11-first-release-preparation). Cross-builds do not establish runtime
+or hardware support. The first version is planned as `v0.1.0`; no tag or release is
+published.
 
 ## Small-SBC validation
 

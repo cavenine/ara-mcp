@@ -1,7 +1,8 @@
 # Resource monitoring, dashboard, and exports
 
 **Status:** T12 implementation complete: bounded live/archive history, local Datastar
-page/SSE feed, and filtered live/archive CSV/JSONL exports. Exports report retained/
+page/SSE feed, newest-first gauges/charts and Ara event table, and filtered live/archive
+CSV/JSONL exports. Exports report retained/
 exported ranges and bounded export/subscriber metrics. T10 verified the remote
 Basic-auth/TLS browser path and recorded initial RPi4 measurements; representative
 imaging-load and trusted-certificate/reverse-proxy validation remain open. RPi 3 is
@@ -33,6 +34,7 @@ or an internet connection, within the [small-SBC budget](architecture.md#deploym
 - [Sampling and bounded history](#sampling-and-bounded-history)
 - [Optional bounded disk archive](#optional-bounded-disk-archive)
 - [Self-hosted live dashboard](#self-hosted-live-dashboard)
+- [Ara server events](#ara-server-events)
 - [CSV and JSONL downloads](#csv-and-jsonl-downloads)
 - [HTTP and access boundaries](#http-and-access-boundaries)
 - [Acceptance criteria](#acceptance-criteria)
@@ -137,6 +139,21 @@ Each patch carries an SSE ID of `instance_id:sample_sequence`; after reconnect, 
 restart or skipped/coalesced sequence updates the freshness message to identify that
 the latest sample was reconciled rather than replaying fabricated intermediate data.
 The dashboard SSE stream is separate from both Ara's WebSocket and MCP's SSE.
+
+### Ara server events
+
+The event table shows up to 50 events, newest first, from the adapter's existing
+owned-session socket. Equipment events include Ara's bounded device type, ID, and
+name where supplied. It does not open an observer WebSocket. Events appear while a
+control session is active; the last rows remain visible after release. Reconnect or
+retention gaps and the dropped-event count are shown. Treat event rows as evidence of
+what Ara reported, not proof an operation completed; use Ara's sequence/job/frame state
+tools for current state.
+
+The diagnostics SSE carries a bounded initial event snapshot and then only newly
+received records. It checks the existing in-memory event buffer at the shared sampler
+cadence (2 seconds by default); it adds no background poller or Ara connection. Event
+payloads and image data are not exposed.
 
 [Datastar](https://data-star.dev/) and its
 [Go SDK](https://github.com/starfederation/datastar-go) are selected. T12 verifies

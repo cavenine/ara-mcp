@@ -665,7 +665,7 @@ func TestMaintainControlWebSocketDeliversAraEvents(t *testing.T) {
 			return
 		}
 		defer conn.CloseNow()
-		if err := conn.Write(t.Context(), websocket.MessageText, []byte(`{"type":"sequence.progress","ts":"2026-10-05T00:00:00Z","seq":7,"payload":{"sequence_id":"seq-1","run_id":"run-2","state":"running","instructions_completed":3,"instructions_total":9}}`)); err != nil {
+		if err := conn.Write(t.Context(), websocket.MessageText, []byte(`{"type":"equipment.connected","ts":"2026-10-05T00:00:00Z","seq":7,"payload":{"device_type":"telescope","device_id":"dev-1","device_name":"EQ6-R","sequence_id":"seq-1","run_id":"run-2","state":"connected","instructions_completed":3,"instructions_total":9}}`)); err != nil {
 			t.Errorf("write event: %v", err)
 		}
 		_, _, _ = conn.Read(t.Context())
@@ -691,8 +691,51 @@ func TestMaintainControlWebSocketDeliversAraEvents(t *testing.T) {
 		})
 	}()
 	event := <-events
-	if event.Type != "sequence.progress" || event.Seq != 7 || event.SequenceID != "seq-1" || event.RunID != "run-2" || event.State != "running" || event.InstructionsCompleted != 3 || event.InstructionsTotal != 9 {
+	if event.Type != "equipment.connected" || event.Seq != 7 || event.DeviceType != "telescope" || event.DeviceID != "dev-1" || event.DeviceName != "EQ6-R" || event.SequenceID != "seq-1" || event.RunID != "run-2" || event.State != "connected" || event.InstructionsCompleted != 3 || event.InstructionsTotal != 9 {
 		t.Fatalf("event = %+v", event)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
+func TestMaintainControlWebSocketMarksOversizedDeviceIdentityAsGap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		payload := `{"type":"equipment.connected","seq":9,"payload":{"device_type":"camera","device_id":"camera-1","device_name":"` + strings.Repeat("x", 257) + `","state":"connected"}}`
+		if err := conn.Write(t.Context(), websocket.MessageText, []byte(payload)); err != nil {
+			t.Errorf("write event: %v", err)
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			cancel()
+		})
+	}()
+	event := <-events
+	if event.Type != "ara.event_gap" || !event.Gap || event.Seq != 9 || event.DeviceName != "" {
+		t.Fatalf("oversized identity event = %+v; want a bounded gap marker", event)
 	}
 	if err := <-done; err == nil {
 		t.Fatal("maintain returned nil after cancellation")

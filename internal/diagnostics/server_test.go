@@ -300,6 +300,21 @@ func TestHandlerServesPinnedDatastarRuntimeLocally(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `src="/assets/datastar-0.21.4.js"`) || strings.Contains(response.Body.String(), "cdn.") {
 		t.Fatalf("dashboard page does not use its local Datastar runtime: %s", response.Body.String())
 	}
+	for _, feature := range []string{
+		`class="starfield"`,
+		`aria-label="CPU usage gauge"`,
+		`aria-label="RSS memory usage gauge"`,
+		`aria-label="CPU usage over time"`,
+		`aria-label="Memory usage over time"`,
+		`aria-label="Ara server events"`,
+		`id="ara-event-rows"`,
+		`Newest first`,
+		`prefers-reduced-motion:reduce`,
+	} {
+		if !strings.Contains(response.Body.String(), feature) {
+			t.Errorf("dashboard missing %q", feature)
+		}
+	}
 }
 
 func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
@@ -311,7 +326,12 @@ func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
 	}
 	sampler := monitor.NewSampler()
 	sample := sampler.Snapshot()
-	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()})
+	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{
+		Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now(),
+		RecentAraEvents: func() AraEventSnapshot {
+			return AraEventSnapshot{Available: true, Events: []ara.WebSocketEvent{{Type: "equipment.connected", Seq: 7, DeviceType: "camera", DeviceID: "camera-1", DeviceName: "ASI2600", State: "connected"}}}
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,8 +357,37 @@ func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
 		}
 		event.WriteString(line)
 	}
-	if !strings.Contains(event.String(), "event: datastar-merge-fragments\n") || !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "data: selector #dashboard\n") || !strings.Contains(event.String(), "data: fragments <main id=\"dashboard\">") || !strings.Contains(event.String(), sample.InstanceID) {
+	if !strings.Contains(event.String(), "event: datastar-merge-fragments\n") || !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "data: selector #dashboard\n") || !strings.Contains(event.String(), "data: fragments <main id=\"dashboard\" class=\"page-shell\">") || !strings.Contains(event.String(), sample.InstanceID) || !strings.Contains(event.String(), "equipment.connected") || !strings.Contains(event.String(), "ASI2600") || !strings.Contains(event.String(), "camera-1") {
 		t.Fatalf("Datastar patch event = %q", event.String())
+	}
+}
+
+func TestDashboardAraEventCursorSendsInitialAndNewEvents(t *testing.T) {
+	var cursor dashboardAraEventCursor
+	initial := AraEventSnapshot{Available: true, LastSequence: 11, Events: []ara.WebSocketEvent{{Type: "sequence.started", Seq: 10}, {Type: "sequence.progress", Seq: 11}}}
+	if events := cursor.advance(initial); len(events) != 2 || events[0].Seq != 10 || events[1].Seq != 11 {
+		t.Fatalf("initial events = %+v", events)
+	}
+	incremental := AraEventSnapshot{Available: true, LastSequence: 12, Events: []ara.WebSocketEvent{{Type: "sequence.started", Seq: 10}, {Type: "sequence.progress", Seq: 11}, {Type: "sequence.complete", Seq: 12}}}
+	if events := cursor.advance(incremental); len(events) != 1 || events[0].Seq != 12 {
+		t.Fatalf("incremental events = %+v; want only sequence 12", events)
+	}
+	cursor.advance(AraEventSnapshot{LastSequence: 12})
+	newSession := AraEventSnapshot{Available: true, LastSequence: 2, Events: []ara.WebSocketEvent{{Type: "sequence.started", Seq: 2}}}
+	if events := cursor.advance(newSession); len(events) != 1 || events[0].Seq != 2 {
+		t.Fatalf("new session events = %+v; want sequence 2 after session reset", events)
+	}
+	buffer := make([]ara.WebSocketEvent, dashboardEventLimit+2)
+	for i := range buffer {
+		buffer[i].Seq = int64(i + 1)
+	}
+	var boundedCursor dashboardAraEventCursor
+	bounded := boundedCursor.advance(AraEventSnapshot{Available: true, LastSequence: int64(len(buffer)), Events: buffer})
+	if len(bounded) != dashboardEventLimit {
+		t.Fatalf("initial dashboard event window = %d entries; want %d", len(bounded), dashboardEventLimit)
+	}
+	if bounded[0].Seq != 3 || bounded[len(bounded)-1].Seq != int64(len(buffer)) {
+		t.Fatalf("initial dashboard event window = %d entries from %d to %d", len(bounded), bounded[0].Seq, bounded[len(bounded)-1].Seq)
 	}
 }
 
