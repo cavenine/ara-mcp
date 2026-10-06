@@ -2,19 +2,24 @@
 
 **Status:** T12 implementation complete: bounded live/archive history, local Datastar
 page/SSE feed, and filtered live/archive CSV/JSONL exports. Exports report retained/
-exported ranges and bounded export/subscriber metrics. T10 still owns remote/TLS
-deployment checks and target-board measurement.
+exported ranges and bounded export/subscriber metrics. T10 verified the remote
+Basic-auth/TLS browser path and recorded initial RPi4 measurements; representative
+imaging-load and trusted-certificate/reverse-proxy validation remain open. RPi 3 is
+untested and excluded from support claims.
 
 The local Chromium smoke confirmed automatic sample advancement and parseable
-live/archive CSV/JSONL responses without any external asset requests. Remote Basic-auth
-browser behavior and target-board overhead have not been validated.
+live/archive CSV/JSONL responses without any external asset requests. T10's remote
+Chromium run loaded the dashboard, local asset, and SSE directly from the RPi4 over
+HTTPS with Basic auth. It used a temporary self-signed test certificate accepted in
+the browser, not a production trust chain.
 
 The page serves the MIT-licensed Datastar v0.21.4 browser bundle locally and emits
 `datastar-merge-fragments` SSE patches through Datastar Go SDK v1.2.2's SSE writer.
 This stable pair was smoke-tested in Chromium with local networking only. The old
 wire event is intentional: the stable browser bundle handles it; the Go SDK's newer
-`PatchElements` helper emits the different v1-beta event name. Remote-auth browser
-behavior and target-board footprint remain unverified.
+`PatchElements` helper emits the different v1-beta event name. The remote test and
+board measurements are recorded in [T10](plan.md#t10-deployment-and-end-to-end-validation);
+they do not establish Pi 3 or physical-imaging suitability.
 See [T12 evidence](plan.md#t12-resource-dashboard-and-exports).
 
 The application monitors its own process/runtime usage and displays it on a

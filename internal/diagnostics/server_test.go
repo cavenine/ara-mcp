@@ -88,6 +88,59 @@ func TestHandlerProbesAccessAndStatus(t *testing.T) {
 	}
 }
 
+func TestHandlerPprofIsOptInAndRequiresBasicAuth(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	client, err := ara.New(ara.Config{BaseURL: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := Runtime{Ara: client, Sampler: monitor.NewSampler(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now()}
+	if _, err := Handler(Access{Username: "operator", Password: "secret", Pprof: true}, runtime); err == nil {
+		t.Fatal("pprof without a diagnostics listener was accepted")
+	}
+	if _, err := Handler(Access{Listen: "127.0.0.1:0", Pprof: true}, runtime); err == nil {
+		t.Fatal("pprof was enabled without Basic-auth credentials")
+	}
+	protected, err := Handler(Access{Listen: "127.0.0.1:0", Username: "operator", Password: "secret", Pprof: true}, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		path string
+		user string
+		want int
+	}{
+		{name: "index unauthorized", path: "/debug/pprof/", want: http.StatusUnauthorized},
+		{name: "index authorized", path: "/debug/pprof/", user: "operator", want: http.StatusOK},
+		{name: "goroutine profile authorized", path: "/debug/pprof/goroutine?debug=1", user: "operator", want: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, test.path, nil)
+			if test.user != "" {
+				req.SetBasicAuth(test.user, "secret")
+			}
+			response := httptest.NewRecorder()
+			protected.ServeHTTP(response, req)
+			if response.Code != test.want {
+				t.Fatalf("status = %d, want %d: %s", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+	disabled, err := Handler(Access{Listen: "127.0.0.1:0"}, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	disabled.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("disabled pprof status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
 func TestHandlerReadinessDegradesWithoutAra(t *testing.T) {
 	client, err := ara.New(ara.Config{BaseURL: "http://127.0.0.1:1", Timeout: 50 * time.Millisecond})
 	if err != nil {

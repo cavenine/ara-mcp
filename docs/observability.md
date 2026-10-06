@@ -9,7 +9,9 @@ records distinct terminal run-state observations from explicit state reads. T09 
 Streamable HTTP request IDs, structured request logs, request counters/latency/in-flight
 measurements, recovered-fault counting (including after committed headers), request
 spans, and bearer/Origin enforcement on `/mcp`. Resource dashboard/exports and profiling
-remain planned.
+are implemented. T10 adds opt-in native pprof on the diagnostics listener; it requires
+Basic authentication even on loopback and is disabled by default. OTLP trace export is
+not currently configured.
 
 T08 counts processed Ara events by bounded category/outcome without identifier labels.
 `get_adapter_diagnostics` exposes last event time/sequence, retained backlog, gap, and

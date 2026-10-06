@@ -12,9 +12,15 @@ and dated headings. No release has been published.
   downloads, with retained/exported range metadata and explicit unavailable/truncated
   range behavior. Add validated Viper limits and bounded export-duration/outcome and
   subscriber/stream metrics, plus locally served Datastar JS v0.21.4 patch updates.
-  Add opt-in bounded rotating JSONL history and streaming archive exports. Remote/TLS
-  browser behavior, full-disk failure simulation, and SBC measurements
-  remain outstanding.
+  Add opt-in bounded rotating JSONL history and streaming archive exports. Remote
+  Basic-auth/TLS Chromium access and initial RPi4 resource measurements are recorded
+  in T10; trusted-certificate/reverse-proxy, full-disk failure, Pi 3-class, and physical
+  imaging-workload validation remain open.
+- T10 non-root systemd deployment example with persistent archive storage, graceful
+  restart and rollback guidance, and systemd credential loading for direct diagnostics
+  TLS. Add opt-in native pprof routes on the diagnostics listener, requiring Basic-auth
+  credentials even for loopback access. Live RPi4/OmniSim save/read/run/manual-camera
+  flows passed through both Streamable HTTP and a local stdio process.
 - T07 manual equipment tools for camera exposures/cooler, telescope slew/park/unpark/
   abort, focuser move/autofocus, filter selection, PHD2 guiding start/stop/dither,
   and Ara's emergency-stop ladder.

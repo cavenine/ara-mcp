@@ -1,0 +1,32 @@
+# Copyright (c) 2026 OpenAstro Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[Unit]
+Description=ara-mcp Streamable HTTP adapter for OpenAstro Ara
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=ara-mcp
+StateDirectoryMode=0750
+EnvironmentFile=/etc/ara-mcp/ara-mcp.env
+ExecStart=/usr/local/bin/ara-mcp serve
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -15,11 +15,13 @@ import (
 )
 
 func TestFramePreviewReturnsMCPImageContent(t *testing.T) {
+	preview := make([]byte, 1<<20)
+	preview[0], preview[1], preview[len(preview)-2], preview[len(preview)-1] = 0xff, 0xd8, 0xff, 0xd9
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/frames/frame-01/thumbnail":
 			w.Header().Set("Content-Type", "image/jpeg")
-			_, _ = w.Write([]byte{0xff, 0xd8, 0xff, 0xd9})
+			_, _ = w.Write(preview)
 		case "/api/v1/jobs/job-01":
 			_, _ = w.Write([]byte(`{"job_id":"job-01","job_type":"autofocus","state":"running","done":3,"total":9,"started_utc":"2026-10-05T00:00:00Z"}`))
 		case "/api/v1/frames":
@@ -91,7 +93,7 @@ func TestFramePreviewReturnsMCPImageContent(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 	image, ok := result.Content[0].(*mcp.ImageContent)
-	if !ok || image.MIMEType != "image/jpeg" || string(image.Data) != string([]byte{0xff, 0xd8, 0xff, 0xd9}) {
+	if !ok || image.MIMEType != "image/jpeg" || len(image.Data) != len(preview) || image.Data[0] != 0xff || image.Data[1] != 0xd8 || image.Data[len(image.Data)-2] != 0xff || image.Data[len(image.Data)-1] != 0xd9 {
 		t.Fatalf("image content = %#v", result.Content[0])
 	}
 	events, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "get_recent_ara_events"})

@@ -23,8 +23,10 @@ compatibility is claimed. T08 job/frame readers, bounded image thumbnails, and
 owned-session event monitoring are implemented. With the optional diagnostics
 listener enabled, the resource page, Datastar SSE updates, live/archive CSV/JSONL
 exports, and bounded rotating archive are available. The page serves Datastar JS
-v0.21.4 with Go SDK v1.2.2. T10 still owns remote-deployment validation and SBC
-measurements. No release is available yet.
+v0.21.4 with Go SDK v1.2.2. T10 validation now includes a live RPi4/OmniSim check
+through stdio and HTTP, a remote Basic-auth/TLS dashboard browser check, and initial
+resource measurements. Pi 3-class, trusted-certificate/reverse-proxy, and physical-rig
+suitability are not claimed. No release is available yet.
 
 The current tool set reads Ara server identity/version/state, rig/profile/device
 context, saved sequence pages/details, sequence templates, validation results, and
@@ -198,8 +200,10 @@ not been exercised against a live daemon or physical equipment.
 - Set `resource-archive-dir` to enable the bounded rotating JSONL archive and archive
   CSV/JSONL downloads; otherwise sampling remains in-memory only.
 
-The Datastar frontend pair and optional archive are implemented. Remote/TLS browser
-validation and board measurement remain for T10/O4/O5. See the [resource dashboard contract](docs/resource-dashboard.md)
+The Datastar frontend pair and optional archive are implemented. Remote Basic-auth/TLS
+browser behavior and initial RPi4 measurements are recorded under T10; trusted-CA
+deployment, lower-resource boards, and co-located imaging headroom remain open (O4/O5).
+See the [resource dashboard contract](docs/resource-dashboard.md)
 and [architecture and API notes](docs/architecture.md)
 for the existing Ara API and integration constraints, and the
 [implementation plan](docs/plan.md) for delivery order and acceptance criteria.
@@ -224,6 +228,7 @@ above. These are intended targets, not a hardware-validation claim.
 - [Initial Ara/MCP contracts](docs/api-contracts.md): T01 tool surface, source evidence,
   and compatibility checks still required before implementation.
 - [Development guide](docs/development.md): setup, checks, and integration testing.
+- [Persistent HTTP deployment](docs/deployment.md): non-root systemd service, access, updates, and rollback.
 - [Logging and observability](docs/observability.md): required logs, metrics, traces,
   health diagnostics, and their acceptance criteria.
 - [Resource dashboard and exports](docs/resource-dashboard.md): process sampling,

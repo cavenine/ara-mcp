@@ -51,6 +51,7 @@ func NewCommand(options CommandOptions) *cobra.Command {
 	flags.String("http-tls-cert", "", "HTTP MCP TLS certificate file")
 	flags.String("http-tls-key", "", "HTTP MCP TLS private key file")
 	flags.String("diagnostics-listen", "", "optional diagnostics HTTP listen address")
+	flags.Bool("diagnostics-pprof", false, "enable Basic-auth-protected native profiling on diagnostics HTTP")
 	flags.String("diagnostics-tls-cert", "", "diagnostics TLS certificate file")
 	flags.String("diagnostics-tls-key", "", "diagnostics TLS private key file")
 	flags.Duration("resource-sample-interval", 0, "process resource sample interval")

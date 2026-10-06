@@ -117,7 +117,7 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 		}
 		handler, err := diagnostics.Handler(diagnostics.Access{
 			Listen: config.DiagnosticsListen, Username: config.DiagnosticsUsername, Password: config.DiagnosticsPassword,
-			TLSCert: config.DiagnosticsTLSCert, TLSKey: config.DiagnosticsTLSKey,
+			TLSCert: config.DiagnosticsTLSCert, TLSKey: config.DiagnosticsTLSKey, Pprof: config.DiagnosticsPprof,
 		}, diagnostics.Runtime{Ara: client, Sampler: sampler, Logger: logger, Version: version, StartedAt: time.Now(), Metrics: metricsHandler, Meter: meterProvider.Meter("github.com/cavenine/ara-mcp/internal/diagnostics"), ExportLimit: config.ResourceExportLimit, Archive: archive})
 		if err != nil {
 			return fmt.Errorf("configure diagnostics HTTP: %w", err)

@@ -15,10 +15,12 @@ This guide owns setup and verification commands for ara-mcp. Read
 - [Build and checks](#build-and-checks)
 - [Test-driven development](#test-driven-development)
 - [Testing Ara integration](#testing-ara-integration)
+- [T10 RPi4 live validation](#t10-rpi4-live-validation-opt-in)
 - [Logging and observability verification](#logging-and-observability-verification)
 - [Agent-assisted development](#agent-assisted-development)
 - [CI and portability](#ci-and-portability)
 - [Small-SBC validation](#small-sbc-validation)
+- [Persistent HTTP deployment](deployment.md)
 - [Working from the plan](#working-from-the-plan)
 
 ## Current state
@@ -28,8 +30,11 @@ T02's Resty-backed Ara HTTP client, T03's executable stdio MCP server, T04's exp
 sequence-execution tools, T07 manual equipment actions, T09's authenticated
 Streamable HTTP endpoint, T13's optional diagnostics HTTP listener, T08's job/frame
 readers, previews, and owned-session event buffer, and T12's initial live/archive
-resource dashboard and exports are implemented. Remote/TLS deployment validation and
-T10 board measurements remain; no release is available yet.
+resource dashboard and exports are implemented. T10 has a live RPi4/OmniSim deployment,
+both-transport workflow checks, a remote Basic-auth/TLS browser check, and initial
+resource measurements. Pi 3-class, physical-rig, trusted-certificate, and full imaging-
+workload validation are outside the current evidence; no Pi 3 or physical-rig suitability
+claim is made. No release is available yet.
 
 Implementation order and acceptance criteria are in [plan.md](plan.md).
 Resolved choices and outstanding evidence are in
@@ -112,6 +117,7 @@ Environment variables use the `ARA_MCP` prefix. Supported settings:
 | HTTP MCP TLS certificate/key | `--http-tls-cert` / `--http-tls-key` | `ARA_MCP_HTTP_TLS_CERT` / `ARA_MCP_HTTP_TLS_KEY` | unset; required for non-loopback |
 | Diagnostics listener | `--diagnostics-listen` | `ARA_MCP_DIAGNOSTICS_LISTEN` | disabled |
 | Diagnostics Basic-auth username/password | not exposed as CLI flags | `ARA_MCP_DIAGNOSTICS_USERNAME` / `ARA_MCP_DIAGNOSTICS_PASSWORD` | unset |
+| Protected native profiling | `--diagnostics-pprof` | `ARA_MCP_DIAGNOSTICS_PPROF` | `false`; requires diagnostics listener and Basic-auth credentials, including on loopback |
 | Diagnostics TLS certificate/key | `--diagnostics-tls-cert` / `--diagnostics-tls-key` | `ARA_MCP_DIAGNOSTICS_TLS_CERT` / `ARA_MCP_DIAGNOSTICS_TLS_KEY` | unset |
 | Resource sample interval | `--resource-sample-interval` | `ARA_MCP_RESOURCE_SAMPLE_INTERVAL` | `2s` (250ms–1m) |
 | Resource history samples | `--resource-history-samples` | `ARA_MCP_RESOURCE_HISTORY_SAMPLES` | `1800` (maximum) |
@@ -132,7 +138,10 @@ alongside stdio when configured. Bind it to loopback for local access. Non-loopb
 addresses require Basic-auth credentials and a valid TLS certificate/key pair;
 diagnostics credentials are separate from MCP credentials. Endpoints are
 `/healthz` (process liveness), `/readyz` (Ara API reachability), `/status` (adapter
-and sampler state), and `/metrics` (Prometheus exposition). TLS is terminated by
+and sampler state), and `/metrics` (Prometheus exposition). When
+`diagnostics-pprof` is enabled, the authenticated `/debug/pprof/` routes serve Go's
+native profiles. Profiling is disabled by default and requires Basic-auth credentials
+even on loopback. TLS is terminated by
 ara-mcp for configured certificates; do not expose plaintext diagnostics remotely.
 Explicitly selected config files must exist and parse; no file is required. YAML:
 
@@ -143,6 +152,7 @@ log-level: info
 timeout: 10s
 read-retries: 0
 diagnostics-listen: 127.0.0.1:9090
+# diagnostics-pprof: false
 resource-sample-interval: 2s
 resource-history-samples: 1800
 resource-history-age: 1h
@@ -400,9 +410,10 @@ network dependency. T10 measures overhead rather than relying on flaky RSS asser
 
 Live checks must show how to retrieve stderr/journald logs and distinguish an
 adapter fault from an Ara operation failure. T13's diagnostics listener and
-Prometheus scrape endpoint are optional and disabled by default; OTLP exporting and
-profiling remain unimplemented. Do not require a remote collector for normal tests
-or to start a local stdio adapter.
+Prometheus scrape endpoint are optional and disabled by default. Native pprof is also
+opt-in through `diagnostics-pprof`; enabling it requires Basic-auth credentials, even
+on loopback. OTLP export is not currently configured. Do not require a remote collector
+for normal tests or to start a local stdio adapter.
 
 Add a reproducible opt-in integration recipe against an actual Ara daemon with
 simulated equipment as the client/control/authoring tasks land, not only after
@@ -455,6 +466,75 @@ set and the Ara control session is free; it sends no equipment command.
 The T06 test requires the `ara-mcp-t06-omnisim` profile and pinned simulator camera
 ID. It runs a short simulated capture, then exercises pause/resume/stop and abort on a
 bounded loop, and removes its test sequences on cleanup. It sends no telescope action.
+
+### T10 RPi4 live validation (opt-in)
+
+The T10 mode of `TestLiveAraSequenceStartAndStateWithPinnedOmniSim` uses the MCP SDK
+client against the deployed `/mcp` service when `ARA_MCP_LIVE_MCP_URL` is set. It saves
+and reads back a sequence, verifies a missing-sequence tool error, starts and observes
+completion, exercises pause/resume/stop/abort, and makes one 0.1-second camera capture
+on the pinned OmniSim camera, then reads its JPEG preview through `get_frame_preview`.
+The test observed a 291-byte simulator JPEG, which may be Ara's placeholder rather than
+a rendered capture; it does not stand in for the 1 MiB preview limit. It releases control
+and deletes its saved test sequences on cleanup. The capture writes only to the profile's
+disposable `/tmp/ara-mcp-t06-captures` directory. No physical device is used.
+
+In stdio mode, the test also ends the adapter process while a 1,000-iteration simulated
+run is active, starts a fresh process/control phase, and verifies Ara reports the same
+active run ID before it continues the lifecycle. This verifies adapter shutdown does not
+stop accepted Ara work; it does not simulate a power loss.
+
+With the RPi4 service running as in [deployment.md](deployment.md), create SSH forwards
+for Ara and the loopback-only MCP endpoint:
+
+```sh
+ssh -N -L 15556:127.0.0.1:5555 -L 18080:127.0.0.1:18080 pauleyj@ara-host
+```
+
+In another terminal, set the bearer token without echoing it, then run the HTTP flow:
+
+```sh
+read -rsp 'HTTP MCP bearer token: ' ARA_MCP_LIVE_MCP_TOKEN
+printf '\n'
+export ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15556
+export ARA_MCP_LIVE_MCP_URL=http://127.0.0.1:18080/mcp
+export ARA_MCP_LIVE_MCP_TOKEN
+go test -tags=integration -count=1 -v -run '^TestLiveAraSequenceStartAndStateWithPinnedOmniSim$' ./internal/mcpserver
+unset ARA_MCP_LIVE_MCP_TOKEN ARA_MCP_LIVE_MCP_URL
+```
+
+Run the same workflow through a local stdio process (the test launches the executable
+and connects with the SDK's `IOTransport`):
+
+```sh
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15556 ARA_MCP_LIVE_MCP_STDIO=1 \
+  go test -tags=integration -count=1 -v -run '^TestLiveAraSequenceStartAndStateWithPinnedOmniSim$' ./internal/mcpserver
+```
+
+To verify a systemd restart while Ara is running the long simulated sequence, use HTTP
+mode and set `ARA_MCP_LIVE_SYSTEMD_RESTART_HOST` to the SSH target of the test service.
+The test restarts `ara-mcp.service`, reconnects, begins a new control phase, and checks
+that Ara still reports the same active run ID. This requires noninteractive SSH and
+permission to run `sudo systemctl restart ara-mcp.service` on that test host.
+
+```sh
+export ARA_MCP_LIVE_SYSTEMD_RESTART_HOST=user@ara-host
+go test -tags=integration -count=1 -v -run '^TestLiveAraSequenceStartAndStateWithPinnedOmniSim$' ./internal/mcpserver
+unset ARA_MCP_LIVE_SYSTEMD_RESTART_HOST
+```
+
+The live control check also covers Ara heartbeat/pong, same-session reconnect, and a
+competing claim rejected with HTTP 409:
+
+```sh
+ARA_MCP_LIVE_ARA_URL=http://127.0.0.1:15556 \
+  go test -tags=integration -count=1 -v -run '^TestLiveAraControlSessionAndHeartbeat$' ./internal/ara
+```
+
+These mutating checks require the dedicated `ara-mcp-t06-omnisim` profile, a free Ara
+control session, and a connected pinned simulator camera. They skip rather than taking
+over another profile/session. A valid run is simulator evidence, not physical-rig or
+arbitrary-MCP-host compatibility evidence.
 
 ## Agent-assisted development
 
