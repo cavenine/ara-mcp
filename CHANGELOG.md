@@ -12,8 +12,8 @@ and dated headings. No release has been published.
   downloads, with retained/exported range metadata and explicit unavailable/truncated
   range behavior. Add validated Viper limits and bounded export-duration/outcome and
   subscriber/stream metrics, plus locally served Datastar JS v0.21.4 patch updates.
-  Add opt-in bounded rotating JSONL history and streaming archive exports. Remote-auth
-  remote/TLS browser behavior, archive disk-failure coverage, and SBC measurements
+  Add opt-in bounded rotating JSONL history and streaming archive exports. Remote/TLS
+  browser behavior, full-disk failure simulation, and SBC measurements
   remain outstanding.
 - T07 manual equipment tools for camera exposures/cooler, telescope slew/park/unpark/
   abort, focuser move/autofocus, filter selection, PHD2 guiding start/stop/dither,

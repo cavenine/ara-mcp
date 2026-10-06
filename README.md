@@ -189,17 +189,17 @@ not been exercised against a live daemon or physical equipment.
 - Retrieve image previews and operation results.
 - When the optional diagnostics listener is enabled, monitor process CPU, RSS/Go
   memory, goroutines, uptime, and freshness on the self-hosted live page at `/`.
-- Download retained in-memory resource statistics at `/resources.csv` or
+- Download retained live resource statistics at `/resources.csv` or
   `/resources.jsonl`; both use the same ordered snapshot and support time/instance
-  filters. Responses identify retained and exported ranges/counts and reject wholly
-  unavailable ranges before streaming.
+  filters. Add `source=archive` to export retained archive records. Responses identify
+  retained and exported ranges/counts and reject wholly unavailable ranges before streaming.
 - Sampling cadence, retained history, dashboard subscriber, and concurrent export
   limits are configurable through Viper and validated before startup.
 - Set `resource-archive-dir` to enable the bounded rotating JSONL archive and archive
   CSV/JSONL downloads; otherwise sampling remains in-memory only.
 
-The Datastar frontend asset pairing and optional archive remain implementation goals;
-T10 still owns board measurement. See the [resource dashboard contract](docs/resource-dashboard.md)
+The Datastar frontend pair and optional archive are implemented. Remote/TLS browser
+validation and board measurement remain for T10/O4/O5. See the [resource dashboard contract](docs/resource-dashboard.md)
 and [architecture and API notes](docs/architecture.md)
 for the existing Ara API and integration constraints, and the
 [implementation plan](docs/plan.md) for delivery order and acceptance criteria.
