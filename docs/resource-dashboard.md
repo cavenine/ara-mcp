@@ -1,9 +1,21 @@
 # Resource monitoring, dashboard, and exports
 
-**Status:** T03's shared process/runtime sampler and T13's optional diagnostics
-HTTP foundation are implemented. The dashboard, bounded history/archive, and
-downloads remain for [T12](plan.md#t12-resource-dashboard-and-exports), before
-T10 deployment validation.
+**Status:** T12 implementation complete: bounded live/archive history, local Datastar
+page/SSE feed, and filtered live/archive CSV/JSONL exports. Exports report retained/
+exported ranges and bounded export/subscriber metrics. T10 still owns remote/TLS
+deployment checks and target-board measurement.
+
+The local Chromium smoke confirmed automatic sample advancement and parseable
+live/archive CSV/JSONL responses without any external asset requests. Remote Basic-auth
+browser behavior and target-board overhead have not been validated.
+
+The page serves the MIT-licensed Datastar v0.21.4 browser bundle locally and emits
+`datastar-merge-fragments` SSE patches through Datastar Go SDK v1.2.2's SSE writer.
+This stable pair was smoke-tested in Chromium with local networking only. The old
+wire event is intentional: the stable browser bundle handles it; the Go SDK's newer
+`PatchElements` helper emits the different v1-beta event name. Remote-auth browser
+behavior and target-board footprint remain unverified.
+See [T12 evidence](plan.md#t12-resource-dashboard-and-exports).
 
 The application monitors its own process/runtime usage and displays it on a
 self-hosted, automatically updating page. Statistics are downloadable as **CSV**
@@ -63,6 +75,9 @@ Use a controllable clock/source boundary for deterministic tests.
   configured interval, retained range, eviction behavior, and current instance.
   Initial defaults are a 2-second interval and at most 1 hour / 1,800 samples /
   2 MiB, whichever history bound is reached first; T10 validates SBC headroom.
+- Resolve and validate sample interval, history count/age, subscriber count, and
+  export concurrency through Viper. Samples are fixed-size values, so the validated
+  1,800-sample ceiling also keeps their history within the 2 MiB budget.
 - Bound subscribers and export concurrency. A slow browser may receive coalesced
   latest-state updates or be disconnected according to a documented policy; it
   cannot stall sampling or grow an unbounded queue. Retained export history stays
@@ -76,14 +91,21 @@ enabled. Neither source promises data before recording or after eviction/rotatio
 
 ## Optional bounded disk archive
 
-Add opt-in rotating JSONL resource history for postmortem samples. General CLI/
-stdio starts memory-only unless configured; the persistent-service example enables
-archival in its dedicated application-owned directory. Initial limits are four
-8 MiB segments (32 MiB total), with a 64-sample / 128 KiB writer queue, periodic
-flush within 5 seconds, and bounded shutdown flushing.
+When `resource-archive-dir` is configured, the sampler writes opt-in rotating JSONL
+resource history for postmortem samples. General CLI/stdio starts memory-only unless
+configured. Limits are four 8 MiB segments (32 MiB total), a 64-sample / 128 KiB
+writer queue, periodic flush within 5 seconds, and bounded shutdown flushing.
+Segment files are created with mode `0600` using fixed names; startup trims excess
+segments and repairs a partial trailing record before appending. A write/flush error
+disables only the archive and logs a bounded failure event; live sampling continues.
 
 Retained completed records survive restart and carry instance/schema/sample
-identity. Publish retained range, rotations, dropped/write-failed records, and gaps.
+identity. Archive CSV/JSONL exports use a fixed-size file-handle snapshot and stream
+rows without loading the 32 MiB retained ceiling into memory. Response headers expose
+retained/exported ranges and archive gaps. `X-Resource-Archive-Gap-Count` counts both
+malformed rows and missing sample-sequence spans; `X-Resource-Archive-Corrupt-Records`
+counts malformed rows. Corrupt rows are skipped, and a partially written final row is
+truncated at restart. Queue drops and write failures are logged with bounded categories.
 A crash may lose recent buffered samples; this is bounded best-effort resource
 history, not a zero-loss journal. Queue/full-disk/write failures degrade archival
 without blocking sampling, dashboard reads, or equipment control.
@@ -106,6 +128,9 @@ must not steal focus or conceal a disconnected/stale state.
 Use **SSE** for automatic updates. A new subscription receives current state and
 continues with new samples. Reconnect from the latest available state, identify
 restarts/gaps explicitly, and release subscriptions when the browser disconnects.
+Each patch carries an SSE ID of `instance_id:sample_sequence`; after reconnect, a
+restart or skipped/coalesced sequence updates the freshness message to identify that
+the latest sample was reconciled rather than replaying fabricated intermediate data.
 The dashboard SSE stream is separate from both Ara's WebSocket and MCP's SSE.
 
 [Datastar](https://data-star.dev/) and its
@@ -141,6 +166,10 @@ data from being presented as one continuous sequence.
 - State the retained/exported range and any requested range that is unavailable.
   Empty history produces a documented valid empty result. Reject invalid formats/
   ranges before streaming, and keep credentials, raw logs, and payloads out of exports.
+- Include `X-Resource-Instance-ID`, retained start/end and sample count, and exported
+  start/end and sample count headers. Return 416 before attachment headers when the
+  requested interval lies wholly outside retained history; mark a partially truncated
+  starting interval with `X-Resource-Range-Truncated: start`.
 
 Planned routes on the diagnostics listener are `GET /` (page),
 `GET /resources/stream` (Datastar SSE), and `GET /resources.csv` /

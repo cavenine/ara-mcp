@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -17,23 +18,60 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-const sampleInterval = 2 * time.Second
+const (
+	defaultSampleInterval  = 2 * time.Second
+	maxSampleInterval      = time.Minute
+	defaultHistorySamples  = 1800
+	defaultHistoryAge      = time.Hour
+	defaultSubscriberLimit = 4
+)
+
+// SamplerConfig bounds process sampling and dashboard subscriptions.
+type SamplerConfig struct {
+	Interval       time.Duration
+	HistorySamples int
+	HistoryAge     time.Duration
+	Subscribers    int
+}
+
+func DefaultSamplerConfig() SamplerConfig {
+	return SamplerConfig{Interval: defaultSampleInterval, HistorySamples: defaultHistorySamples, HistoryAge: defaultHistoryAge, Subscribers: defaultSubscriberLimit}
+}
+
+func (c SamplerConfig) Validate() error {
+	if c.Interval < 250*time.Millisecond || c.Interval > maxSampleInterval {
+		return errors.New("resource sample interval must be between 250ms and 1m")
+	}
+	if c.HistorySamples < 1 || c.HistorySamples > defaultHistorySamples {
+		return fmt.Errorf("resource history samples must be between 1 and %d", defaultHistorySamples)
+	}
+	if c.HistoryAge < c.Interval || c.HistoryAge > defaultHistoryAge {
+		return errors.New("resource history age must be at least the sample interval and at most 1h")
+	}
+	if c.Subscribers < 1 || c.Subscribers > defaultSubscriberLimit {
+		return fmt.Errorf("dashboard subscribers must be between 1 and %d", defaultSubscriberLimit)
+	}
+	return nil
+}
 
 // Snapshot reports adapter-local process state, not Ara or equipment health.
 type Snapshot struct {
-	SampledAt     time.Time `json:"sampled_at"`
-	UptimeSeconds float64   `json:"uptime_seconds"`
-	CPUPercent    float64   `json:"cpu_percent"`
-	CPUAvailable  bool      `json:"cpu_available"`
-	LogicalCPUs   int       `json:"logical_cpus"`
-	RSSBytes      uint64    `json:"rss_bytes"`
-	RSSAvailable  bool      `json:"rss_available"`
-	GoAllocBytes  uint64    `json:"go_alloc_bytes"`
-	GoSysBytes    uint64    `json:"go_sys_bytes"`
-	Goroutines    int       `json:"goroutines"`
-	GOMaxProcs    int       `json:"gomaxprocs"`
-	HeapObjects   uint64    `json:"heap_objects"`
-	GCCount       uint32    `json:"gc_count"`
+	SchemaVersion  string    `json:"schema_version"`
+	InstanceID     string    `json:"instance_id"`
+	SampleSequence uint64    `json:"sample_sequence"`
+	SampledAt      time.Time `json:"sampled_at"`
+	UptimeSeconds  float64   `json:"uptime_seconds"`
+	CPUPercent     float64   `json:"cpu_percent"`
+	CPUAvailable   bool      `json:"cpu_available"`
+	LogicalCPUs    int       `json:"logical_cpus"`
+	RSSBytes       uint64    `json:"rss_bytes"`
+	RSSAvailable   bool      `json:"rss_available"`
+	GoAllocBytes   uint64    `json:"go_alloc_bytes"`
+	GoSysBytes     uint64    `json:"go_sys_bytes"`
+	Goroutines     int       `json:"goroutines"`
+	GOMaxProcs     int       `json:"gomaxprocs"`
+	HeapObjects    uint64    `json:"heap_objects"`
+	GCCount        uint32    `json:"gc_count"`
 }
 
 type processStats struct {
@@ -56,30 +94,51 @@ type samplerMetrics struct {
 
 // Sampler returns one shared, paced process/runtime snapshot.
 type Sampler struct {
-	mu       sync.Mutex
-	started  time.Time
-	lastAt   time.Time
-	lastProc processStats
-	procOK   bool
-	last     Snapshot
-	metrics  samplerMetrics
-	now      func() time.Time
-	readProc func() (processStats, error)
+	mu          sync.Mutex
+	started     time.Time
+	lastAt      time.Time
+	lastProc    processStats
+	procOK      bool
+	last        Snapshot
+	history     []Snapshot
+	instance    string
+	sequence    uint64
+	config      SamplerConfig
+	archive     *Archive
+	subscribers map[chan Snapshot]struct{}
+	metrics     samplerMetrics
+	now         func() time.Time
+	readProc    func() (processStats, error)
 }
 
 // NewSampler creates a sampler backed by the process platform's native counters.
 func NewSampler() *Sampler {
-	now := time.Now
-	return &Sampler{started: now(), now: now, readProc: readProcessStats}
+	return newSampler(DefaultSamplerConfig())
 }
 
-// NewSamplerWithMeter creates a sampler and its bounded process gauges.
-func NewSamplerWithMeter(meter metric.Meter) (*Sampler, error) {
+// NewSamplerWithConfig creates a sampler with validated history and subscriber limits.
+func NewSamplerWithConfig(config SamplerConfig) (*Sampler, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	return newSampler(config), nil
+}
+
+func newSampler(config SamplerConfig) *Sampler {
+	now := time.Now
+	started := now()
+	return &Sampler{started: started, now: now, readProc: readProcessStats, config: config, instance: fmt.Sprintf("%x-%x", os.Getpid(), started.UnixNano())}
+}
+
+// NewSamplerWithMeter creates a configured sampler and its process gauges.
+func NewSamplerWithMeter(meter metric.Meter, config SamplerConfig) (*Sampler, error) {
 	if meter == nil {
 		return nil, errors.New("metrics meter is required")
 	}
-	result := NewSampler()
-	var err error
+	result, err := NewSamplerWithConfig(config)
+	if err != nil {
+		return nil, err
+	}
 	if result.metrics.cpu, err = meter.Float64Gauge("process.cpu.percent", metric.WithUnit("%"), metric.WithDescription("Process CPU percentage; one logical CPU is 100 percent")); err != nil {
 		return nil, fmt.Errorf("create process CPU gauge: %w", err)
 	}
@@ -118,23 +177,27 @@ func (s *Sampler) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	if !s.lastAt.IsZero() && now.Sub(s.lastAt) < sampleInterval {
+	if !s.lastAt.IsZero() && now.Sub(s.lastAt) < s.config.Interval {
 		return s.last
 	}
 	current, processErr := s.readProc()
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	sample := Snapshot{
-		SampledAt:     now.UTC(),
-		UptimeSeconds: now.Sub(s.started).Seconds(),
-		LogicalCPUs:   runtime.NumCPU(),
-		GoAllocBytes:  mem.Alloc,
-		GoSysBytes:    mem.Sys,
-		Goroutines:    runtime.NumGoroutine(),
-		GOMaxProcs:    runtime.GOMAXPROCS(0),
-		HeapObjects:   mem.HeapObjects,
-		GCCount:       mem.NumGC,
+		SchemaVersion:  "1",
+		InstanceID:     s.instance,
+		SampleSequence: s.sequence + 1,
+		SampledAt:      now.UTC(),
+		UptimeSeconds:  now.Sub(s.started).Seconds(),
+		LogicalCPUs:    runtime.NumCPU(),
+		GoAllocBytes:   mem.Alloc,
+		GoSysBytes:     mem.Sys,
+		Goroutines:     runtime.NumGoroutine(),
+		GOMaxProcs:     runtime.GOMAXPROCS(0),
+		HeapObjects:    mem.HeapObjects,
+		GCCount:        mem.NumGC,
 	}
+	s.sequence++
 	if processErr == nil {
 		sample.RSSBytes, sample.RSSAvailable = current.rss, true
 		if s.procOK && now.After(s.lastAt) {
@@ -149,6 +212,21 @@ func (s *Sampler) Snapshot() Snapshot {
 		s.procOK = false
 	}
 	s.lastAt, s.last = now, sample
+	s.history = append(s.history, sample)
+	cutoff := now.Add(-s.config.HistoryAge)
+	first := 0
+	for first < len(s.history) && (len(s.history)-first > s.config.HistorySamples || s.history[first].SampledAt.Before(cutoff)) {
+		first++
+	}
+	s.history = append(s.history[:0], s.history[first:]...)
+	for subscriber := range s.subscribers {
+		select {
+		case subscriber <- sample:
+		default:
+			<-subscriber
+			subscriber <- sample
+		}
+	}
 	attrs := metric.WithAttributes(attribute.String("service", "ara-mcp"))
 	if s.metrics.goAlloc != nil {
 		s.metrics.goAlloc.Record(context.Background(), int64(sample.GoAllocBytes), attrs)
@@ -180,7 +258,65 @@ func (s *Sampler) Snapshot() Snapshot {
 	if sample.CPUAvailable && s.metrics.cpu != nil {
 		s.metrics.cpu.Record(context.Background(), sample.CPUPercent, attrs)
 	}
+	if s.archive != nil {
+		s.archive.Record(sample)
+	}
 	return sample
+}
+
+// SetArchive sends newly sampled records to the optional non-blocking archive writer.
+func (s *Sampler) SetArchive(archive *Archive) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.archive = archive
+}
+
+// Subscribe returns an initial/latest sample channel and an unsubscribe function.
+// Slow subscribers receive only the newest sample; at most four are retained.
+func (s *Sampler) Subscribe() (<-chan Snapshot, func(), bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.subscribers) >= s.config.Subscribers {
+		return nil, nil, false
+	}
+	subscriber := make(chan Snapshot, 1)
+	if len(s.history) > 0 {
+		subscriber <- s.history[len(s.history)-1]
+	}
+	if s.subscribers == nil {
+		s.subscribers = make(map[chan Snapshot]struct{})
+	}
+	s.subscribers[subscriber] = struct{}{}
+	return subscriber, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if _, exists := s.subscribers[subscriber]; exists {
+			delete(s.subscribers, subscriber)
+			close(subscriber)
+		}
+	}, true
+}
+
+// History returns a defensive copy of the retained, ordered samples.
+func (s *Sampler) History() []Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Snapshot(nil), s.history...)
+}
+
+// Run continuously refreshes the shared snapshot until ctx is cancelled.
+func (s *Sampler) Run(ctx context.Context) {
+	s.Snapshot()
+	ticker := time.NewTicker(s.config.Interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.Snapshot()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // RuntimeInfo returns the Go build and runtime versions without exposing settings.

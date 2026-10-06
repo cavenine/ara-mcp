@@ -46,9 +46,27 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 		meterProvider = sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
 	}
 	tracerProvider := sdktrace.NewTracerProvider()
-	sampler, err := monitor.NewSamplerWithMeter(meterProvider.Meter("github.com/cavenine/ara-mcp/internal/monitor"))
+	sampler, err := monitor.NewSamplerWithMeter(meterProvider.Meter("github.com/cavenine/ara-mcp/internal/monitor"), monitor.SamplerConfig{
+		Interval: config.ResourceSampleInterval, HistorySamples: config.ResourceHistorySamples,
+		HistoryAge: config.ResourceHistoryAge, Subscribers: config.DashboardSubscriberLimit,
+	})
 	if err != nil {
 		return fmt.Errorf("create process sampler: %w", err)
+	}
+	var archive *monitor.Archive
+	if config.ResourceArchiveDir != "" {
+		archive, err = monitor.OpenArchive(config.ResourceArchiveDir, logger)
+		if err != nil {
+			logger.WarnContext(ctx, "resource archive unavailable; continuing without persistence", "service", "ara-mcp", "version", version, "component", "resource_archive", "event", "archive_unavailable", "error_class", "archive_unavailable")
+			archive = nil
+		} else {
+			sampler.SetArchive(archive)
+			defer func() {
+				closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_ = archive.Close(closeCtx)
+				closeCancel()
+			}()
+		}
 	}
 	control, err := mcpserver.NewControlManager(
 		client, logger, version, config.Transport,
@@ -100,7 +118,7 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 		handler, err := diagnostics.Handler(diagnostics.Access{
 			Listen: config.DiagnosticsListen, Username: config.DiagnosticsUsername, Password: config.DiagnosticsPassword,
 			TLSCert: config.DiagnosticsTLSCert, TLSKey: config.DiagnosticsTLSKey,
-		}, diagnostics.Runtime{Ara: client, Sampler: sampler, Logger: logger, Version: version, StartedAt: time.Now(), Metrics: metricsHandler})
+		}, diagnostics.Runtime{Ara: client, Sampler: sampler, Logger: logger, Version: version, StartedAt: time.Now(), Metrics: metricsHandler, Meter: meterProvider.Meter("github.com/cavenine/ara-mcp/internal/diagnostics"), ExportLimit: config.ResourceExportLimit, Archive: archive})
 		if err != nil {
 			return fmt.Errorf("configure diagnostics HTTP: %w", err)
 		}
@@ -118,6 +136,11 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 		logger.InfoContext(ctx, "diagnostics HTTP listener started", "service", "ara-mcp", "version", version, "component", "diagnostics_http", "event", "startup", "address", diagnosticsListener.Addr().String())
 	}
 	runCtx, stop := context.WithCancel(ctx)
+	samplerDone := make(chan struct{})
+	go func() {
+		defer close(samplerDone)
+		sampler.Run(runCtx)
+	}()
 	mcpErrors := make(chan error, 1)
 	if mcpHTTPServer != nil {
 		go func() {
@@ -154,6 +177,12 @@ func Serve(ctx context.Context, config Config, version string, stderr io.Writer)
 		<-runCtx.Done()
 	}
 	stop()
+	<-samplerDone
+	if archive != nil {
+		archiveCtx, archiveCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		runErr = errors.Join(runErr, archive.Close(archiveCtx))
+		archiveCancel()
+	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	runErr = errors.Join(runErr, control.Close(shutdownCtx, ""))
 	shutdownCancel()

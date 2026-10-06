@@ -1,6 +1,6 @@
 # ara-mcp implementation plan
 
-**Status:** T00–T07, T09, and T13 are complete. This plan tracks delivery status and
+**Status:** T00–T09, T12, and T13 are complete. This plan tracks delivery status and
 acceptance evidence; it is not itself an implemented capability list.
 No release version or date is assigned.
 
@@ -118,7 +118,7 @@ requires implemented deliverables and recorded verification, not merely a design
 | T07 | [Manual equipment tools](#t07-manual-equipment-tools) | Complete — Ara client/tool contracts, capability/run preflight, interrupt lane, fake-Ara/MCP tests, and repository checks passed; no live-device claim | T04, T06 |
 | T08 | [Progress, events, and image previews](#t08-progress-events-and-image-previews) | Implemented; contract tests pass, live T08 daemon check remains pending | T06, T07 |
 | T09 | [Streamable HTTP deployment](#t09-streamable-http-deployment) | Complete — authenticated SDK transport, committed-header fault accounting, and independent concurrent sessions verified with SDK v1.8.0; no named third-party host or target-board claim | T03, T04, T13 |
-| T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Pending | T03, T13 |
+| T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Complete — bounded sampler/history, local Datastar page/SSE, live/archive CSV/JSONL exports, config limits, range/gap reporting, and browser smoke verified; T10 still owns target-board and remote-deployment evidence | T03, T13 |
 | T10 | [Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation) | Pending | T05–T09, T12, T13 |
 | T11 | [First release preparation](#t11-first-release-preparation) | Pending | T10 |
 
@@ -738,6 +738,65 @@ headers produces a structured fault without appending a second error payload or
 rewriting committed headers; the SDK client observes stream termination/failure.
 
 ### T12 Resource dashboard and exports
+
+**Status:** Complete for the T12 implementation deliverables (2026-10-06). Bounded live
+and optional archive history, the locally served Datastar dashboard/SSE, and filtered
+live/archive CSV/JSONL downloads are implemented and covered by tests/browser smoke.
+No target-board or remote-deployment performance claim is made; T10/O4/O5 retain that
+external validation.
+
+The latest T12 slice reports retained/exported instance, range, and sample counts in
+export response headers. An entirely expired/future range returns 416 before file
+attachment headers; an overlapping request that predates retention is served with an
+explicit truncation header. Export duration/outcome, active exports, current
+subscribers, subscriber-limit rejections, and stream outcomes are now instrumented.
+Viper now resolves and validates sample interval, history count/age, dashboard
+subscriber limit, export concurrency, and optional archive directory; the validated
+defaults are 2s, 1,800 samples/1h, four subscribers, and two exports. The local
+Datastar/browser pair is JS v0.21.4 and Go SDK v1.2.2, served with the bundle's MIT
+license and smoke-tested in Chromium. The Go SDK SSE writer emits the stable v0.21
+`datastar-merge-fragments` event using its generic event method.
+
+The optional archive uses four 8 MiB JSONL segments, a 64-sample queue, bounded
+five-second flushes, tail-record repair at restart, and streamed fixed-size archive
+snapshots. Archive output is selectable via `source=archive`; malformed complete rows
+are skipped and sample-sequence gaps are counted by `X-Resource-Archive-Gap-Count`,
+while a partial trailing record is repaired on startup. Live Datastar SSE IDs pair
+the process instance and sample sequence; clients reconnect at the latest state and
+the page flags restarts or skipped/coalesced sample sequences.
+
+Manual browser smoke (2026-10-06): Chromium with configured Basic Authorization loaded
+the diagnostics page, observed Datastar sample patches, and reported no console errors.
+Requests stayed on the local page, pinned JS bundle, and same-origin SSE stream. Archive
+CSV/JSONL both returned 200 with attachment/range headers; all 52 JSONL rows parsed.
+This validated loopback Basic auth, not remote/TLS browser behavior. Target-board
+overhead remains unmeasured.
+
+**Focused RED/GREEN evidence:**
+
+- `go test -count=1 -run '^TestResourceExportsUseSharedSampleHistory$' ./internal/diagnostics` first returned 404 for both export routes, then passed after the endpoints were added.
+- `go test -count=1 -run '^TestSamplerRetainsBoundedOrderedHistory$' ./internal/monitor` first failed to compile because `Sampler.History` did not exist, then passed after history/identity support was implemented.
+- `go test -count=1 -run '^TestSamplerSubscriptionsCoalesceLatestAndRespectLimit$' ./internal/monitor` first failed to compile because bounded sample subscriptions were absent, then passed after adding coalescing subscriptions.
+- `TestResourceStreamSendsCurrentSampleAndFlushes` verifies a sample over the composed Chi middleware and Datastar SDK SSE writer.
+- `TestResourceExportReportsAndRejectsUnavailableRetainedRange` first returned HTTP 200 with an empty attachment for a wholly expired interval; it now returns 416 with retained-range metadata, and identifies partial truncation.
+- `TestResourceExportsRecordMetricsAndBalanceActiveCount` first failed to compile because diagnostics had no meter dependency; it now verifies export outcomes/duration and a balanced active-export counter.
+- `TestLoadConfigEnvironmentFileAndDefaults` first failed to compile because resource settings were absent from the typed config; it now verifies environment values/defaults, while `TestLoadConfigRejectsInvalidResourceLimits` rejects an explicit zero interval and `TestResourceSampleFlagOverridesEnvironment` verifies flag precedence.
+- `TestSamplerConfigBoundsHistoryAndSubscribers` verifies configured history retention and subscriber limits.
+- `TestHandlerServesPinnedDatastarRuntimeLocally` and `TestResourceStreamSendsCurrentSampleAndFlushes` first failed with a missing static asset/custom `resource` event; they now verify the pinned local runtime and its `datastar-merge-fragments` patch wire format.
+- `TestArchivePersistsAndRotatesWithinQuota` first failed to compile because the archive writer was absent; it now verifies rotation, retained segment limits, and restart append. `TestArchiveRecoversPartialTailAfterRestart` verifies recovery from an interrupted trailing row. `TestArchiveExportsStreamRetainedJSONLAndCSV` checks both archive formats and surfaced corruption gaps.
+- `TestArchiveQueueDropsWithoutBlockingWhenWriterIsBusy` verifies bounded nonblocking queue overflow. `TestServeHTTPStartsAndShutsDown` verifies an enabled archive flushes a sample before shutdown.
+- `TestSamplerContinuesAfterArchiveWriteFailure` injects a closed archive file and verifies subsequent process samples still advance.
+- `TestResourceStreamSendsCurrentSampleAndFlushes` first failed because the SSE patch had no resumption ID; it now verifies `instance_id:sample_sequence`. `TestResourceStreamMarksReplayedGap` verifies a stale cursor produces an explicit reconciliation message.
+
+Resource-bound configuration uses Viper flags/environment/file/default precedence:
+sample interval 250ms–1m, at most 1,800 retained fixed-size samples/1h, 1–4
+subscribers, and 1–2 concurrent exports. The defaults match the first-release policy.
+
+Latest checks passed: `gofmt -l .`, `go test -race -shuffle=on -count=1 ./...`,
+`go vet ./...`, `go build ./...`, `go mod tidy -diff`, `go mod verify`,
+`env -u ARA_MCP_LIVE_ARA_URL go test -tags=integration ./...`, and
+`git diff --check`; docs validation checked 18 documents and 340 local links/anchors.
+Cross-builds passed for Linux amd64/arm64, Darwin amd64/arm64, and Windows amd64.
 
 **Goal:** monitor the application's own resources through a self-hosted live page
 and downloadable CSV/JSONL statistics, within the small-SBC budget.

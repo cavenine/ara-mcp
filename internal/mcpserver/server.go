@@ -77,7 +77,7 @@ func New(options Options) (*mcp.Server, error) {
 		},
 	}
 	if options.Sampler == nil {
-		options.Sampler, err = monitor.NewSamplerWithMeter(options.Meter)
+		options.Sampler, err = monitor.NewSamplerWithMeter(options.Meter, monitor.DefaultSamplerConfig())
 		if err != nil {
 			return nil, fmt.Errorf("create process sampler: %w", err)
 		}

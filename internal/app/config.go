@@ -12,27 +12,34 @@ import (
 	"time"
 
 	"github.com/cavenine/ara-mcp/internal/diagnostics"
+	"github.com/cavenine/ara-mcp/internal/monitor"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
 // Config is the validated runtime configuration passed to the adapter.
 type Config struct {
-	AraURL              string        `mapstructure:"ara-url"`
-	Transport           string        `mapstructure:"transport"`
-	LogLevel            string        `mapstructure:"log-level"`
-	Timeout             time.Duration `mapstructure:"timeout"`
-	ReadRetries         int           `mapstructure:"read-retries"`
-	HTTPListen          string        `mapstructure:"http-listen"`
-	HTTPBearerToken     string        `mapstructure:"http-bearer-token"`
-	HTTPOrigins         []string      `mapstructure:"http-origins"`
-	HTTPTLSCert         string        `mapstructure:"http-tls-cert"`
-	HTTPTLSKey          string        `mapstructure:"http-tls-key"`
-	DiagnosticsListen   string        `mapstructure:"diagnostics-listen"`
-	DiagnosticsUsername string        `mapstructure:"diagnostics-username"`
-	DiagnosticsPassword string        `mapstructure:"diagnostics-password"`
-	DiagnosticsTLSCert  string        `mapstructure:"diagnostics-tls-cert"`
-	DiagnosticsTLSKey   string        `mapstructure:"diagnostics-tls-key"`
+	AraURL                   string        `mapstructure:"ara-url"`
+	Transport                string        `mapstructure:"transport"`
+	LogLevel                 string        `mapstructure:"log-level"`
+	Timeout                  time.Duration `mapstructure:"timeout"`
+	ReadRetries              int           `mapstructure:"read-retries"`
+	HTTPListen               string        `mapstructure:"http-listen"`
+	HTTPBearerToken          string        `mapstructure:"http-bearer-token"`
+	HTTPOrigins              []string      `mapstructure:"http-origins"`
+	HTTPTLSCert              string        `mapstructure:"http-tls-cert"`
+	HTTPTLSKey               string        `mapstructure:"http-tls-key"`
+	DiagnosticsListen        string        `mapstructure:"diagnostics-listen"`
+	DiagnosticsUsername      string        `mapstructure:"diagnostics-username"`
+	DiagnosticsPassword      string        `mapstructure:"diagnostics-password"`
+	DiagnosticsTLSCert       string        `mapstructure:"diagnostics-tls-cert"`
+	DiagnosticsTLSKey        string        `mapstructure:"diagnostics-tls-key"`
+	ResourceSampleInterval   time.Duration `mapstructure:"resource-sample-interval"`
+	ResourceHistorySamples   int           `mapstructure:"resource-history-samples"`
+	ResourceHistoryAge       time.Duration `mapstructure:"resource-history-age"`
+	DashboardSubscriberLimit int           `mapstructure:"dashboard-subscriber-limit"`
+	ResourceExportLimit      int           `mapstructure:"resource-export-limit"`
+	ResourceArchiveDir       string        `mapstructure:"resource-archive-dir"`
 }
 
 // LoadConfig resolves explicit flags, environment, optional file, and defaults.
@@ -41,7 +48,7 @@ func LoadConfig(flags *pflag.FlagSet, configFile string) (Config, error) {
 	v.SetEnvPrefix("ARA_MCP")
 	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	v.AutomaticEnv()
-	for _, key := range []string{"ara-url", "transport", "log-level", "timeout", "read-retries", "http-listen", "http-bearer-token", "http-origins", "http-tls-cert", "http-tls-key", "diagnostics-listen", "diagnostics-username", "diagnostics-password", "diagnostics-tls-cert", "diagnostics-tls-key"} {
+	for _, key := range []string{"ara-url", "transport", "log-level", "timeout", "read-retries", "http-listen", "http-bearer-token", "http-origins", "http-tls-cert", "http-tls-key", "diagnostics-listen", "diagnostics-username", "diagnostics-password", "diagnostics-tls-cert", "diagnostics-tls-key", "resource-sample-interval", "resource-history-samples", "resource-history-age", "dashboard-subscriber-limit", "resource-export-limit", "resource-archive-dir"} {
 		if err := v.BindEnv(key); err != nil {
 			return Config{}, fmt.Errorf("bind %s environment variable: %w", key, err)
 		}
@@ -58,6 +65,13 @@ func LoadConfig(flags *pflag.FlagSet, configFile string) (Config, error) {
 	v.SetDefault("read-retries", 0)
 	v.SetDefault("http-listen", "127.0.0.1:8080")
 	v.SetDefault("diagnostics-listen", "")
+	defaults := monitor.DefaultSamplerConfig()
+	v.SetDefault("resource-sample-interval", defaults.Interval)
+	v.SetDefault("resource-history-samples", defaults.HistorySamples)
+	v.SetDefault("resource-history-age", defaults.HistoryAge)
+	v.SetDefault("dashboard-subscriber-limit", defaults.Subscribers)
+	v.SetDefault("resource-export-limit", 2)
+	v.SetDefault("resource-archive-dir", "")
 	if configFile != "" {
 		v.SetConfigFile(configFile)
 		if err := v.ReadInConfig(); err != nil {
@@ -100,6 +114,12 @@ func (c Config) Validate() error {
 	}
 	if c.ReadRetries < 0 || c.ReadRetries > 2 {
 		return fmt.Errorf("read retries must be between 0 and 2")
+	}
+	if err := (monitor.SamplerConfig{Interval: c.ResourceSampleInterval, HistorySamples: c.ResourceHistorySamples, HistoryAge: c.ResourceHistoryAge, Subscribers: c.DashboardSubscriberLimit}).Validate(); err != nil {
+		return fmt.Errorf("invalid resource limits: %w", err)
+	}
+	if c.ResourceExportLimit < 1 || c.ResourceExportLimit > 2 {
+		return fmt.Errorf("resource export limit must be between 1 and 2")
 	}
 	if (c.HTTPTLSCert == "") != (c.HTTPTLSKey == "") {
 		return fmt.Errorf("HTTP TLS certificate and key must be configured together")

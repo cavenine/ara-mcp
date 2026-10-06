@@ -272,6 +272,14 @@ while all HTTP requests use the existing Chi access/logging policy.
 Use the selected [CPU denominator, limits, and archive/access defaults](first-release-policy.md#dashboard-history-and-provisional-limits).
 Archives survive restart for completed retained records, expose gaps/rotation, and
 degrade independently on write failure; they never block control or sampling.
+T12 records `resource.dashboard.exports` and
+`resource.dashboard.export.duration` by bounded `format` (`csv`/`jsonl`) and
+`source` (`live`/`archive`) and `outcome` (`success`, `rejected`, `cancelled`, or
+`write_error`), with a balanced
+`resource.dashboard.active_exports` up/down counter. Live feeds expose
+`resource.dashboard.subscribers`, `resource.dashboard.subscriber.rejections`, and
+`resource.dashboard.streams` by bounded termination outcome. IDs and timestamps are
+response metadata, never metric labels.
 
 ## Profiling and operational access
 
