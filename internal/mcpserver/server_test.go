@@ -77,12 +77,19 @@ func TestGetServerContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 12 {
-		t.Fatalf("discovered %d tools, want 12", len(tools.Tools))
+	if len(tools.Tools) != 20 {
+		t.Fatalf("discovered %d tools, want 20", len(tools.Tools))
 	}
+	toolNames := make(map[string]bool, len(tools.Tools))
 	for _, tool := range tools.Tools {
+		toolNames[tool.Name] = true
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
 			t.Errorf("tool %q is not marked read-only", tool.Name)
+		}
+	}
+	for _, name := range []string{"get_autofocus_state", "get_autofocus_frame", "get_autofocus_calibration", "list_faults", "get_fault", "get_guide_focus_status", "get_guide_focus_frame", "solve_frame"} {
+		if !toolNames[name] {
+			t.Errorf("read-only tool %q was not registered", name)
 		}
 	}
 

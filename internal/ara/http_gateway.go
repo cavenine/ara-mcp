@@ -256,6 +256,9 @@ func (g *httpGateway) doAttempt(ctx context.Context, input request, method strin
 	if resp != nil {
 		response.result.Status = resp.StatusCode()
 		response.result.RequestID = safeRequestID(resp.Header().Get("X-Request-ID"))
+		if input.ResponseHeaderValue != nil {
+			*input.ResponseHeaderValue = resp.Header().Get(input.ResponseHeader)
+		}
 		response.body = resp.Body()
 		response.result.Outcome = g.httpOutcome(method, response.result.Status)
 		response.isAccepted = response.result.Status == http.StatusAccepted

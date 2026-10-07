@@ -144,17 +144,18 @@ The dashboard SSE stream is separate from both Ara's WebSocket and MCP's SSE.
 
 The event table shows up to 50 events, newest first, from the adapter's existing
 owned-session socket. Rows show Ara's event time/type, equipment type/ID/name, state,
-and bounded fault/action/progress context where supplied. It does not open an observer
-WebSocket. Events appear while a control session is active; the last rows remain visible
-after release. Reconnect or
-retention gaps and the dropped-event count are shown. Treat event rows as evidence of
-what Ara reported, not proof an operation completed; use Ara's sequence/job/frame state
-tools for current state.
+fault/action/progress context, exposure timing, guider measurements/session markers, and
+autofocus probe/fit/results where supplied. It does not open an observer WebSocket.
+Events appear while a control session is active; the last rows remain visible after
+release. Reconnect or retention gaps and the dropped-event count are shown. Treat event
+rows as evidence of what Ara reported, not proof an operation completed; use Ara's
+sequence/job/frame state tools for current state.
 
 The diagnostics SSE carries a bounded initial event snapshot and then only newly
 received records. It checks the existing in-memory event buffer at the shared sampler
 cadence (2 seconds by default); it adds no background poller or Ara connection. Event
-payloads and image data are not exposed.
+raw payloads and image data are not exposed; only the adapter's bounded context
+projection is included.
 
 [Datastar](https://data-star.dev/) and its
 [Go SDK](https://github.com/starfederation/datastar-go) are selected. T12 verifies

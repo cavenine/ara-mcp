@@ -57,19 +57,27 @@ func registerProgressTools(server *mcp.Server, instrumentation toolInstrumentati
 		return frame, err
 	})
 	tool := &mcp.Tool{Name: "get_frame_preview", Description: "Read Ara's JPEG frame thumbnail as MCP image content (maximum 1 MiB).", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}}
-	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, input FrameInput) (*mcp.CallToolResult, any, error) {
+	registerImageTool(server, instrumentation, tool, func(ctx context.Context, input FrameInput) ([]byte, any, error) {
+		image, _, err := client.GetFrameThumbnailWithRequestID(ctx, input.FrameID, requestID(ctx))
+		return image, map[string]any{"frame_id": input.FrameID, "mime_type": "image/jpeg", "size_bytes": len(image)}, err
+	})
+}
+
+func registerImageTool[In any](server *mcp.Server, instrumentation toolInstrumentation, tool *mcp.Tool, read func(context.Context, In) ([]byte, any, error)) {
+	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
 		id, err := newRequestID()
 		if err != nil {
 			return nil, nil, fmt.Errorf("assign tool request id: %w", err)
 		}
 		ctx = context.WithValue(ctx, requestIDKey{}, id)
 		started := time.Now()
-		ctx, span := instrumentation.tracer.Start(ctx, "mcp.tool.get_frame_preview", trace.WithAttributes(attribute.String("mcp.tool.name", tool.Name)))
+		ctx, span := instrumentation.tracer.Start(ctx, "mcp.tool."+tool.Name, trace.WithAttributes(attribute.String("mcp.tool.name", tool.Name)))
 		defer span.End()
 		attrs := attribute.String("mcp.tool.name", tool.Name)
 		instrumentation.metrics.inflight.Add(ctx, 1, metric.WithAttributes(attrs))
 		defer instrumentation.metrics.inflight.Add(ctx, -1, metric.WithAttributes(attrs))
 		var image []byte
+		var output any
 		var callErr error
 		select {
 		case instrumentation.reads <- struct{}{}:
@@ -78,13 +86,13 @@ func registerProgressTools(server *mcp.Server, instrumentation toolInstrumentati
 			callErr = errReadCapacity
 		}
 		if callErr == nil {
-			image, _, callErr = client.GetFrameThumbnailWithRequestID(ctx, input.FrameID, requestID(ctx))
+			image, output, callErr = read(ctx, input)
 		}
 		outcome, level := "success", slog.LevelInfo
 		if callErr != nil {
 			outcome, level = "error", slog.LevelError
-			span.RecordError(errors.New("frame preview failed"))
-			span.SetStatus(codes.Error, "frame preview failed")
+			span.RecordError(errors.New("image read failed"))
+			span.SetStatus(codes.Error, "image read failed")
 		}
 		fields := []any{"service", "ara-mcp", "version", instrumentation.version, "component", "tools", "event", "tool_call", "transport", instrumentation.transport, "request_id", id, "tool", tool.Name, "outcome", outcome, "duration_seconds", time.Since(started).Seconds()}
 		if callErr != nil {
@@ -100,7 +108,10 @@ func registerProgressTools(server *mcp.Server, instrumentation toolInstrumentati
 		if callErr != nil {
 			return nil, nil, callErr
 		}
-		result := &mcp.CallToolResult{Content: []mcp.Content{&mcp.ImageContent{Data: image, MIMEType: "image/jpeg"}}}
-		return result, map[string]any{"frame_id": input.FrameID, "mime_type": "image/jpeg", "size_bytes": len(image)}, nil
+		result := new(mcp.CallToolResult)
+		if len(image) > 0 {
+			result.Content = []mcp.Content{&mcp.ImageContent{Data: image, MIMEType: "image/jpeg"}}
+		}
+		return result, output, nil
 	})
 }

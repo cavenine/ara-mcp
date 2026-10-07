@@ -1,9 +1,10 @@
 # ara-mcp implementation plan
 
-**Status:** T00–T07 and T09–T13 are complete; T08 is implemented with live daemon
+**Status:** T00–T07 and T09–T18 are complete; T08 is implemented with live daemon
 validation still pending. T11 release preparation is complete. This plan tracks delivery
-status and acceptance evidence; it is not itself an implemented capability list. The
-planned first adapter version is `v0.1.0`; no tag or release is published.
+status and acceptance evidence;
+it is not itself an implemented capability list. The planned first adapter version is
+`v0.1.0`; no tag or release is published.
 
 ## Table of contents
 
@@ -26,6 +27,11 @@ planned first adapter version is `v0.1.0`; no tag or release is published.
   - [T12 — Resource dashboard and exports](#t12-resource-dashboard-and-exports)
   - [T10 — Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation)
   - [T11 — First release preparation](#t11-first-release-preparation)
+  - [T14 — Rich Ara event context](#t14-rich-ara-event-context)
+  - [T15 — Autofocus lifecycle tools](#t15-autofocus-lifecycle-tools)
+  - [T16 — Ara fault history](#t16-ara-fault-history)
+  - [T17 — Guide-camera focus](#t17-guide-camera-focus)
+  - [T18 — Plate solving and centering](#t18-plate-solving-and-centering)
 - [Outstanding verification](#outstanding-verification)
 - [Completion and maintenance](#completion-and-maintenance)
 
@@ -122,12 +128,19 @@ requires implemented deliverables and recorded verification, not merely a design
 | T12 | [Resource dashboard and exports](#t12-resource-dashboard-and-exports) | Complete — bounded sampler/history, local Datastar page/SSE, live/archive CSV/JSONL exports, CPU/RSS charts, and a newest-first Ara event table with bounded equipment identity and event context; no extra WebSocket is opened. Config limits, range/gap reporting, and browser behavior are verified; T10 records RPi4 load and remote TLS checks. | T03, T13, T08 |
 | T10 | [Deployment and end-to-end validation](#t10-deployment-and-end-to-end-validation) | Complete for the measured RPi4/OmniSim deployment: systemd, live stdio/HTTP, active-run recovery, pprof, remote TLS browser, and bounded resource stress verified. Pi 3/physical/trusted-CA claims are excluded; O5 records remaining resource limits. | T05–T09, T12, T13 |
 | T11 | [First release preparation](#t11-first-release-preparation) | Complete — end-user install/configuration guide, tool reference, source/build/archive/checksum procedure, and license/source notice index added. `v0.1.0` is the planned first version; no release tag/artifacts published. Claims remain bounded to recorded Ara/OmniSim and CI evidence. | T10 |
+| T14 | [Rich Ara event context](#t14-rich-ara-event-context) | Complete — bounded exposure, guider, and autofocus projections flow through MCP snapshots and dashboard rows; malformed/oversized contexts mark gaps, reconnect/replay remains sequenced, and only the owned WebSocket is used. Source-reviewed against Ara `29f72ea2246a1343a60724361d271912610b3503`; focused and repository checks recorded below. | T04, T08, T12 |
+| T15 | [Autofocus lifecycle tools](#t15-autofocus-lifecycle-tools) | Complete — bounded run/calibration readers, 1 MiB JPEG frame as MCP image with Ara frame sequence, owned-control cancel/recalibrate actions, active-run checks, and state reconciliation. | T04, T07, T08, T14 |
+| T16 | [Ara fault history](#t16-ara-fault-history) | Complete — read-only bounded cursor pages/filters and fault detail, with validated numeric cursor, page limits, and token filters; no control required. | T02, T03 |
+| T17 | [Guide-camera focus](#t17-guide-camera-focus) | Complete — owned-control start/stop through Ara's guider lease, preflight for connected guider/polar alignment/runs, plus status and bounded JPEG frame readers/observations. | T04, T07, T08, T14 |
+| T18 | [Plate solving and centering](#t18-plate-solving-and-centering) | Complete — saved-frame solve, finite UUID/coordinate validation, telescope/run preflight, asynchronous center jobs and controlled job cancellation with status reconciliation. | T04, T06, T08, T14 |
 
 First milestone: T01–T03, a real read-only stdio adapter. T13/T12 can then deliver
 local HTTP diagnostics/dashboard/downloads before all equipment tools are complete.
 T04–T06 add sequence control; T09 HTTP MCP can land once control and the HTTP
 foundation exist. T07/T08 complete manual actions/monitoring; T10/T11 validate and
-release the combined product. Existing task IDs remain stable.
+release the combined product. Existing task IDs remain stable. The T14–T18 follow-on
+Ara API work was delivered in priority order: richer owned-session events, autofocus
+lifecycle, durable fault history, guide-camera focus, then plate solving/centering.
 
 ## Task details
 
@@ -1007,6 +1020,220 @@ the Unreleased changelog. The artifact procedure creates only ignored local `dis
 files; no tag or release is created. Linux ARM64 runtime evidence is the RPi4/OmniSim
 check; other artifact targets are compile-only. No named MCP host or unsupported Ara
 version, physical rig, Pi 3, or minimum-memory support is claimed.
+
+### T14 Rich Ara event context
+
+**Goal:** let tools and the dashboard use useful details from Ara's newer event
+families without opening an additional observer connection or retaining unbounded
+payloads.
+
+**Work:**
+
+- Recheck the target Ara event catalog and publisher payloads for camera exposure
+  lifecycle, guider step/session, and autofocus lifecycle events.
+- Extend the existing session-bound T04 decoder/projection with only bounded fields
+  needed to interpret these events; preserve sequence, timestamp, gap, and replay
+  behavior. Never retain raw event JSON, image bytes, or arbitrary payloads.
+- Make recent-event tools and the T12 dashboard useful for exposure timing, guider
+  measurements/session markers, and autofocus progress/results where supplied.
+- Keep the one owned Ara WebSocket as the event source. Outside control, retain the
+  existing REST fallback and do not open an unbound subscription.
+- Cover known payloads, missing/unknown fields, bounds, replay/deduplication, overflow,
+  and gap reconciliation. Keep event labels and retained byte use bounded.
+
+**Deliverables:** bounded event projections and MCP/dashboard rendering for the
+selected Ara event families, with decoder and retention regression coverage.
+
+**Acceptance:** events remain newest-first and bounded; oversized or malformed fields
+produce the established explicit gap behavior. Reconnect/replay does not duplicate
+events, and no second WebSocket is opened. Event-derived activity is evidence of what
+Ara reported, not proof of operation completion.
+
+**Completion evidence (2026-10-06):** RED/GREEN coverage added bounded projection
+tests for camera exposure start/complete, guider step/session, autofocus probe/result/
+collimation, and malformed/oversized event gaps. The new fields pass through the MCP
+`get_recent_ara_events` snapshot and dashboard SSE payload; the dashboard renders
+exposure, guider, autofocus, and fit/collimation details. Snapshot tests verify nested
+measurements cannot mutate retained buffer state. Guider telemetry uses the existing
+bounded `equipment` metric category.
+
+The event catalog and publishers were checked at Ara commit
+[`29f72ea2246a1343a60724361d271912610b3503`](https://github.com/open-astro/openastro-ara/tree/29f72ea2246a1343a60724361d271912610b3503).
+The current Ara `linux-arm64` package was built with .NET SDK 10.0.401 in a container,
+installed on the RPi4 as `0.0.1-dev-20261006.1`, and restarted. `/healthz` returned
+`ok`; `/server/versions` reported the expected Ara commit; the live WebSocket catalog
+advertised all selected exposure, guider, and autofocus event types. The live
+`TestLiveAraSequenceStartAndStateWithPinnedOmniSim` flow passed on the RPi4 after the
+upgrade, including a camera-simulator `camera.exposure_complete` event with matching
+frame ID, exposure seconds, and elapsed milliseconds. The test used its guarded
+`ara-mcp-t06-omnisim` profile and disposable capture directory; it did not move a
+telescope or exercise physical equipment. Guider/autofocus event payload projections
+are source-reviewed and contract-tested, not claimed as live event-source checks.
+
+Focused and final checks passed: `go test -count=1 ./internal/ara ./internal/mcpserver
+./internal/diagnostics`, `go test -race -shuffle=on -count=1 ./...`, `go vet ./...`,
+`go build ./...`, `go mod tidy -diff`, `go mod verify`, `gofmt -l .`,
+`git diff --check`, integration-tag tests with the live URL unset, and cross-builds for
+Linux/arm64, Darwin/amd64, Darwin/arm64, and Windows/amd64.
+
+### T15 Autofocus lifecycle tools
+
+**Goal:** let an agent inspect Ara's autofocus run beyond the initial job receipt and
+request cancellation with honest outcome semantics.
+
+**Work:**
+
+- Recheck Ara's autofocus state, JPEG frame, cancel, and calibration contracts against
+  the endpoint handlers and run tracker; do not infer behavior from DTOs alone.
+- Add bounded state and frame reads, including no-frame/not-calibrated states and the
+  upstream frame sequence/cache behavior.
+- Add cancellation through the existing control/interrupt policy. Account for runs
+  started by either MCP or a sequence; report acceptance separately from the eventual
+  job/run result and reconcile through Ara state/events.
+- Expose calibration reads and recalibration only if their operator effect and
+  interaction with active runs are verified; otherwise record the upstream gap.
+- Bound JPEG bytes and state response size. Add sanitized observability and tests for
+  accepted, conflicting, missing, cancelled, failed, and ambiguous outcomes.
+
+**Deliverables:** autofocus state/frame readers and a verified cancellation flow,
+with calibration support only when its contract is established.
+
+**Acceptance:** an agent can inspect a live/recent run and its rendered frame, identify
+terminal outcomes from Ara's authoritative state, and cancel without claiming that an
+accepted request already stopped the focuser. Frame limits and active-run conflicts
+are explicit; cancellation cannot silently replay after an uncertain response.
+
+**Completion evidence (2026-10-06):** Ara state, frame, calibration, cancel, and
+recalibrate routes were checked against the tracker and handlers at commit
+`29f72ea2246a1343a60724361d271912610b3503`. The client bounds JPEGs at 1 MiB and
+surfaces `X-Frame-Seq`; the state tool includes `frame_seq`. Cancel uses T04's reserved
+interrupt/intent ledger and immediately reconciles current state; recalibration uses
+normal mutation arbitration and refuses active sequence/autofocus runs. Fake-Ara/MCP
+tests cover 204/no-frame, 404/uncalibrated, over-limit JPEG, cancellation conflict,
+active-run refusal, accepted/result state, and mutation deduplication. The RPi4 read
+probe returned autofocus state `idle`, calibration 404, and frame 204; no autofocus
+mutation was issued on the Pi.
+Focused contracts: `TestGetAutofocusStateWithRequestIDUsesAraContract`,
+`TestGetAutofocusFrameWithRequestIDBoundsJPEGAndHandlesNoFrame`,
+`TestGetAutofocusCalibrationWithRequestIDUsesAraContract`,
+`TestAutofocusCancelAndRecalibrateUseAraRoutes`,
+`TestAutofocusReadToolsExposeStateCalibrationAndFrame`, and
+`TestAutofocusMutationToolsUseControlAndObserveCancellation`.
+
+### T16 Ara fault history
+
+**Goal:** provide durable diagnostic context beyond the bounded in-memory WebSocket
+event window.
+
+**Work:**
+
+- Verify Ara's fault list/detail routes, cursor semantics, filters, retention, and
+  wire bounds against the service implementation.
+- Add read-only client methods and a tool for bounded cursor pages with useful filters,
+  plus an individual fault lookup. Preserve Ara's numeric offset cursor string and avoid
+  unbounded fetches.
+- Keep this independent of control ownership and do not imply that fault rows are a
+  complete event journal or current device state.
+- Test pagination, filters, missing records, malformed cursors/responses, and response
+  limits; instrument reads without using fault/device IDs as metric labels.
+
+**Deliverables:** cursor-paged fault-history and fault-detail tools with Ara contract
+tests and concise tool guidance.
+
+**Acceptance:** an agent can retrieve retained faults without claiming control; page
+limits and filter values are validated, and gaps/retention limits are reported without
+inventing missing history.
+
+**Completion evidence (2026-10-06):** Ara's handlers and SQLite fault service at commit
+`29f72ea2246a1343a60724361d271912610b3503` confirm a 1–200 page limit, decimal offset
+cursor, equipment/session/unresolved/fault-type filters, and UUID detail lookup. The
+client rejects invalid limits/cursors/filters and malformed response cursors; MCP list
+and detail tools are read-only. RED/GREEN client and MCP contract tests cover filters,
+pagination, response validation, detail and not-found. A live RPi4 `GET /faults?limit=1`
+returned 200 with one retained row; fault detail contents were not copied into test
+logs.
+Focused contracts: `TestListFaultsUsesBoundedAraCursorAndFilters`,
+`TestListFaultsRejectsInvalidCursorAndFiltersBeforeDispatch`,
+`TestListFaultsRejectsOutOfRangeLimitAndMalformedResponseCursor`,
+`TestGetFaultUsesGuidRoute`, and `TestFaultToolsReadPagesAndDetailsWithoutControl`.
+
+### T17 Guide-camera focus
+
+**Goal:** expose Ara's guide-camera focus loop so an agent can start, observe, and stop
+the operation through the daemon that owns the guider camera.
+
+**Work:**
+
+- Verify start/stop/status/frame behavior, request limits, and conflicts with guiding,
+  polar alignment, and other camera leases against Ara's service implementation.
+- Add explicit start/stop mutations through T04 control and arbitration; do not access
+  the guider camera directly or treat an accepted start as completed focus.
+- Add status and bounded JPEG-frame readers with no-frame behavior and frame sequence
+  handling. Use T14 events where useful, with REST state as the reconciliation source.
+- Test lease conflicts, cancellation/stop drain behavior, missing frames, response
+  bounds, and uncertain mutation outcomes.
+
+**Deliverables:** guide-camera focus lifecycle and observation tools, using Ara's
+existing camera lease and bounded frame API.
+
+**Acceptance:** requests cannot take the camera from guiding or polar alignment;
+results distinguish accepted, running, stopped, and failed states. No second camera
+client or unbound event connection is created.
+
+**Completion evidence (2026-10-06):** Ara's guide-focus handlers/service at commit
+`29f72ea2246a1343a60724361d271912610b3503` confirm request limits, the PHD2 lease,
+guiding/polar-align conflicts, synchronous stop drain, status, and bounded JPEG frame.
+Start/stop use the owned control mutation dispatcher; start checks the guider, polar
+alignment, and active-run state. Status/frame remain read-only and frame bytes are
+capped at 1 MiB. Fake-Ara/MCP tests cover accepted start, drained stop, lease conflicts,
+status, JPEG and 204 no-frame. The RPi4 status read returned `idle`; start/stop were not
+run because `openastro-guider.service` is absent on that host.
+Focused contracts: `TestGuideFocusStartPreservesAra400And409WithoutRetry`,
+`TestGuideFocusRoutesAndFrameBounds`, `TestGuideFocusFrameNoContentAndOversize`,
+`TestGuideFocusToolsExposeStatusAndImage`, and
+`TestGuideFocusMutationsUseControlAndAraLease`.
+
+### T18 Plate solving and centering
+
+**Goal:** let an agent request a solve of an Ara-catalogued frame or center a mount on
+coordinates using Ara's plate-solve workflow.
+
+**Work:**
+
+- Verify saved-frame solve inputs/results, configured solver/database requirements,
+  coordinate units, centering-job identity, cancellation, and conflict behavior against
+  Ara's endpoints and backing services.
+- Add a saved-frame solve operation without returning FITS data or leaking local
+  filesystem paths. Bound solve responses and make missing solver/database states clear.
+- Add coordinate centering through the T04 mutation dispatcher as an asynchronous
+  mount operation. Return the job receipt, observe authoritative job state, and reconcile
+  cancellation, same-target joins, different-target conflicts, active runs, and unknown
+  mutation outcomes; never equate HTTP 202 with successful centering.
+- Preserve RA hours and declination degrees in schemas, preflight relevant equipment/run
+  state, and instrument acceptance and terminal observations separately.
+- Test malformed/out-of-range coordinates, job failures/cancellation, API conflicts,
+  lost responses, and restart/reconciliation behavior without hardware by default.
+
+**Deliverables:** bounded saved-frame solve and controlled centering tools, documented
+with their solver requirements, units, job lifecycle, and limitations.
+
+**Acceptance:** solving a frame does not imply mount movement. Centering is serialized
+with other mutations, remains cancellable/reconcilable as Ara-owned work, and reports
+only Ara-observed completion. No direct plate solver, telescope driver, or FITS path
+access is added to ara-mcp.
+
+**Completion evidence (2026-10-06):** Ara's solve/center/jobs handlers at commit
+`29f72ea2246a1343a60724361d271912610b3503` were verified: saved-frame solve returns
+only solution metadata; center returns a `center` job, joins identical targets, and
+conflicts on a different active target. The adapter validates UUIDs and finite J2000
+coordinates, checks telescope/run state, returns accepted jobs for `get_job_status`,
+and provides control-arbitrated cancellation with a post-request job observation.
+Contract tests cover solve results, 202 job receipts, same-target join, different-target
+conflict, unknown outcomes, cancellation, and invalid coordinates. The live RPi4 plate
+database endpoint reported zero files; no solve or mount-centering operation was run.
+Focused contracts: `TestSolveFrameUsesAraContract`,
+`TestCenterAndCancelJobUseAraContracts`, `TestPlateSolveToolsExposeSolveCenterAndCancel`,
+and `TestCenterCoordinateValidation`.
 
 ## Outstanding verification
 
