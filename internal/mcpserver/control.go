@@ -61,7 +61,7 @@ const (
 	maxIntentWaiters         = 4
 	maxRecentEvents          = 128
 	maxRecentEventBytes      = 1 << 20
-	recentEventMetadataBytes = 4096 // Conservative per-event bound including device, fault, and timestamp details.
+	recentEventMetadataBytes = 4096 // Conservative per-event bound including device, fault, and telemetry contexts.
 )
 
 // MutationKind selects the adapter admission policy for a mutating request.
@@ -651,15 +651,73 @@ func (m *ControlManager) RecentEvents() EventSnapshot {
 	stale := !m.socketActive || m.lastHeartbeat == nil || time.Since(*m.lastHeartbeat) > time.Minute
 	events := make([]ara.WebSocketEvent, len(m.events))
 	for i, event := range m.events {
-		if event.CurrentInstructionIndex != nil {
-			event.CurrentInstructionIndex = new(*event.CurrentInstructionIndex)
-		}
-		if event.FailedInstructionIndex != nil {
-			event.FailedInstructionIndex = new(*event.FailedInstructionIndex)
-		}
-		events[i] = event
+		events[i] = cloneWebSocketEvent(event)
 	}
 	return EventSnapshot{Available: available, Stale: stale, Gap: m.eventGap, LastSequence: m.lastEventSequence, Dropped: m.droppedEvents, Events: events}
+}
+
+func cloneWebSocketEvent(event ara.WebSocketEvent) ara.WebSocketEvent {
+	event.CurrentInstructionIndex = cloneEventValue(event.CurrentInstructionIndex)
+	event.FailedInstructionIndex = cloneEventValue(event.FailedInstructionIndex)
+	if event.Exposure != nil {
+		context := *event.Exposure
+		context.ExposureSec = cloneEventValue(context.ExposureSec)
+		context.ElapsedMS = cloneEventValue(context.ElapsedMS)
+		event.Exposure = &context
+	}
+	if event.Guider != nil {
+		context := *event.Guider
+		context.Frame = cloneEventValue(context.Frame)
+		context.TimeSec = cloneEventValue(context.TimeSec)
+		context.RARawPX = cloneEventValue(context.RARawPX)
+		context.DecRawPX = cloneEventValue(context.DecRawPX)
+		context.RAArcsec = cloneEventValue(context.RAArcsec)
+		context.DecArcsec = cloneEventValue(context.DecArcsec)
+		context.RADurationMS = cloneEventValue(context.RADurationMS)
+		context.DecDurationMS = cloneEventValue(context.DecDurationMS)
+		context.PixelScaleArcsec = cloneEventValue(context.PixelScaleArcsec)
+		context.StarMass = cloneEventValue(context.StarMass)
+		context.SNR = cloneEventValue(context.SNR)
+		context.DXPX = cloneEventValue(context.DXPX)
+		context.DYPX = cloneEventValue(context.DYPX)
+		context.DistancePX = cloneEventValue(context.DistancePX)
+		context.SettleTimeSec = cloneEventValue(context.SettleTimeSec)
+		context.Status = cloneEventValue(context.Status)
+		event.Guider = &context
+	}
+	if event.Autofocus != nil {
+		context := *event.Autofocus
+		context.StepIndex = cloneEventValue(context.StepIndex)
+		context.ShotIndex = cloneEventValue(context.ShotIndex)
+		context.Position = cloneEventValue(context.Position)
+		context.Stars = cloneEventValue(context.Stars)
+		context.StarsUsed = cloneEventValue(context.StarsUsed)
+		context.TotalSteps = cloneEventValue(context.TotalSteps)
+		context.FinalPosition = cloneEventValue(context.FinalPosition)
+		context.FinalStars = cloneEventValue(context.FinalStars)
+		context.Probes = cloneEventValue(context.Probes)
+		context.RestoredPosition = cloneEventValue(context.RestoredPosition)
+		context.Kept = cloneEventValue(context.Kept)
+		context.Usable = cloneEventValue(context.Usable)
+		context.WithinRange = cloneEventValue(context.WithinRange)
+		context.HFR = cloneEventValue(context.HFR)
+		context.RSquared = cloneEventValue(context.RSquared)
+		context.BestPosition = cloneEventValue(context.BestPosition)
+		context.PredictedHFR = cloneEventValue(context.PredictedHFR)
+		context.FinalHFR = cloneEventValue(context.FinalHFR)
+		context.DurationSeconds = cloneEventValue(context.DurationSeconds)
+		context.OffsetPercent = cloneEventValue(context.OffsetPercent)
+		context.DirectionDegrees = cloneEventValue(context.DirectionDegrees)
+		event.Autofocus = &context
+	}
+	return event
+}
+
+func cloneEventValue[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	return new(*value)
 }
 
 // Require rejects mutations unless the caller presents the live phase ID.
@@ -1060,7 +1118,7 @@ func eventCategory(eventType string) string {
 	switch {
 	case strings.HasPrefix(eventType, "sequence."):
 		return "sequence"
-	case strings.HasPrefix(eventType, "equipment.") || strings.HasPrefix(eventType, "camera."):
+	case strings.HasPrefix(eventType, "equipment.") || strings.HasPrefix(eventType, "camera.") || strings.HasPrefix(eventType, "guider."):
 		return "equipment"
 	case strings.HasPrefix(eventType, "autofocus.") || strings.HasPrefix(eventType, "session.") || strings.HasPrefix(eventType, "calibration."):
 		return "job"

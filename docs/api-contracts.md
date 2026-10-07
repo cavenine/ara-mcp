@@ -41,8 +41,9 @@ captured bodies before freezing schemas.
 
 ## First tool surface
 
-The table is the MCP tool contract; T03–T07 rows are implemented. T08's frame/job
-readers remain planned. Every mutation also requires the selected
+The table is the MCP tool contract for the initial T03–T07 surface. T08's job/frame
+readers and T14's event projection are implemented; the source-reviewed T15–T18
+surfaces are recorded below. Every mutation also requires the selected
 first-release `control_id` and `intent_id` fields, except `end_control`, which
 requires the current control ID. The adapter checks these locally; Ara does not
 enforce this contract for legacy REST mutations. Operation acceptance is never
@@ -93,8 +94,8 @@ unconditionally pauses active sequences after asking the mount to abort. Exposur
 abort and `emergency_stop` likewise bypass ordinary mutation saturation. Normal
 manual actions preflight connected-device capabilities/status and the bounded sequence
 list; active/paused runs are rejected before dispatch. Immediate device reads after
-acceptance are labeled observations, not causal completion. Ara's frame/job reader
-tools are not in T07; T08 adds them. Ara's pinned master source registers guider
+acceptance are labeled observations, not causal completion. T08 adds Ara's frame/job
+readers. Ara's pinned master source registers guider
 `/start`, `/stop`, and `/dither` routes, backed by `GuiderService` methods that require
 a connected PHD2 guider and schedule the operation before returning a 202 receipt.
 T07 checks guider connection and the bounded active-run list before dispatch.
@@ -103,6 +104,22 @@ The route and service wiring were verified in Ara commit
 `OpenAstroAra.Server/Endpoints/EquipmentEndpoints.cs` and
 `OpenAstroAra.Server/Services/GuiderService.cs`. These are source/fake-Ara contract
 checks only; T07 has no live guider or physical-rig validation.
+
+### Ara API follow-up tools (T15–T18)
+
+The following routes and backing services were rechecked in Ara commit
+[`29f72ea2246a1343a60724361d271912610b3503`](https://github.com/open-astro/openastro-ara/tree/29f72ea2246a1343a60724361d271912610b3503).
+They are source-verified against that development build; per-tool evidence and the
+RPi4/OmniSim exposure-event check are recorded in [T14–T18](plan.md#task-list).
+
+| MCP tool family | Ara routes | Contract and limits |
+| --- | --- | --- |
+| Autofocus state/frame/calibration | `GET /autofocus/state`, `/frame`, `/calibration` | State carries the current/recent run, bounded probes, fit curve and `frame_seq`; frame is JPEG, `X-Frame-Seq`, `Cache-Control: no-store`, 204 until rendered. Calibration 404 means uncalibrated. |
+| Autofocus cancel/recalibrate | `POST /autofocus/cancel`, `/recalibrate` | Cancel returns 202 or 409 when no run is active and can cancel a sequence-started sweep. Recalibrate synchronously clears stored calibration; next successful Classic sweep rebuilds it. Ara cancel acceptance is not terminal completion. |
+| Fault history | `GET /faults?limit=&cursor=&equipmentType=&sessionId=&unresolvedOnly=&faultType=`, `GET /faults/{id}` | Ara caps the page at 200, returns a numeric offset cursor, and keeps retained rows in SQLite with configured pruning. History is not a complete event journal or current state; invalid cursors fall back to offset zero upstream, so ara-mcp validates cursors before dispatch. |
+| Guide-camera focus | `GET/POST /equipment/guider/focus`, `/focus/frame`, `POST /focus/start`, `/focus/stop`; `GET /equipment/polaralign/status` | Start is 202 (0.05–30 s exposure, optional binning); 409 for disconnected/busy/guide or polar-alignment lease conflicts. Stop is 204 after the in-flight frame drains. Status is a current snapshot; frame is JPEG or 204, capped by ara-mcp at 1 MiB. |
+| Saved-frame solve | `POST /platesolve/frames/{id}/solve` | Optional coordinate hints are an RA-hour/Dec-degree pair. Returns solution metadata only; 404 is a missing frame and 422 reports solver/profile configuration errors. No FITS bytes or daemon-local paths are exposed. |
+| Coordinate centering | `POST /platesolve/center`, `GET/DELETE /jobs/{id}` | RA hours `[0,24)`, declination degrees `[-90,90]`; 202 returns an asynchronous `center` job. Same-target requests join; a different active target returns 409. Job status is authoritative; delete requests cancellation but does not itself prove the mount is stationary. |
 
 The simulator confirmed one supported sequence palette: typed sequential containers,
 bounded `LoopCondition`, `SwitchFilter`, and `TakeExposure`. The packaged

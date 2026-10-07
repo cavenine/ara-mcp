@@ -11,9 +11,10 @@ sequences, and execution.
 
 ## What it does
 
-Use an AI agent to inspect the rig and sequences, prepare and validate a plan, request
-supported equipment actions, and monitor Ara jobs and runs. ara-mcp is an adapter,
-not a replacement for Ara, a hardware driver, or an imaging sequencer.
+Use an AI agent to inspect the rig, sequences, and retained faults; prepare and validate
+a plan; request supported equipment/focus/centering actions; and monitor Ara jobs,
+autofocus, and run events. ara-mcp is an adapter, not a replacement for Ara, a hardware
+driver, or an imaging sequencer.
 
 ```mermaid
 flowchart LR
@@ -147,10 +148,20 @@ and read its compatibility limits before running a plan.
 
 - Both stdio and authenticated Streamable HTTP passed live workflows against the
   pinned Ara development build and OmniSim on a Raspberry Pi 4 (Debian 13, ARM64).
-  This is simulator evidence, not a physical-rig result.
+  Ara commit `29f72ea` was also deployed for the T14 exposure-event check. This is
+  simulator evidence, not a physical-rig result.
 - The live flows covered sequence and representative camera operations. The wider T07
   manual-tool set has fake-Ara/MCP contract coverage, not live-daemon or physical-device
   validation.
+- T15–T18 autofocus, fault-history, guide-camera focus, and plate-solve/centering tools
+  have bounded client/MCP contract tests. Only autofocus state/frame availability,
+  fault-page reading, guide-focus status, and plate-solver database status were probed
+  live; no autofocus/guide-focus mutation, plate solve, centering, or physical device
+  action was exercised.
+- Current Ara `29f72ea` was installed on the Pi for an owned-session exposure-event check;
+  the simulator event reached the MCP event snapshot with its frame ID and timing. Fault,
+  autofocus, guide-focus, and plate-solving/centering tools have contract tests, not live
+  operation evidence.
 - HTTP TLS/browser access and initial process-resource measurements were checked on
   that setup. At-limit dashboard/export CPU exceeded the provisional 5% busy target;
   see the recorded [T10 evidence](docs/plan.md#t10-deployment-and-end-to-end-validation).

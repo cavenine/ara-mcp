@@ -49,6 +49,8 @@ func TestFramePreviewReturnsMCPImageContent(t *testing.T) {
 	control.lastHeartbeat = &heartbeat
 	control.mu.Unlock()
 	control.recordEvent(ara.WebSocketEvent{Type: "sequence.progress", Seq: 1, SequenceID: "seq-1", RunID: "run-1", State: "running", InstructionsCompleted: 2, InstructionsTotal: 5})
+	exposureSeconds, elapsedMS := 30.0, int64(30120)
+	control.recordEvent(ara.WebSocketEvent{Type: "camera.exposure_complete", Seq: 2, Exposure: &ara.ExposureEventContext{FrameID: "frame-02", ExposureSec: &exposureSeconds, ElapsedMS: &elapsedMS}})
 	t.Cleanup(control.stop)
 	server, err := New(Options{Ara: client, Control: control})
 	if err != nil {
@@ -105,7 +107,7 @@ func TestFramePreviewReturnsMCPImageContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var snapshot EventSnapshot
-	if err := json.Unmarshal(eventBody, &snapshot); err != nil || !snapshot.Available || snapshot.Stale || len(snapshot.Events) != 1 || snapshot.Events[0].RunID != "run-1" || snapshot.Events[0].InstructionsCompleted != 2 || snapshot.Events[0].InstructionsTotal != 5 {
+	if err := json.Unmarshal(eventBody, &snapshot); err != nil || !snapshot.Available || snapshot.Stale || len(snapshot.Events) != 2 || snapshot.Events[0].RunID != "run-1" || snapshot.Events[0].InstructionsCompleted != 2 || snapshot.Events[0].InstructionsTotal != 5 || snapshot.Events[1].Exposure == nil || snapshot.Events[1].Exposure.FrameID != "frame-02" || snapshot.Events[1].Exposure.ElapsedMS == nil || *snapshot.Events[1].Exposure.ElapsedMS != elapsedMS {
 		t.Fatalf("event snapshot = %+v, error = %v", snapshot, err)
 	}
 }

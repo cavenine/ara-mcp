@@ -169,13 +169,28 @@ The event reader extends only T04's session-bound WebSocket. It retains at most 
 events and 1 MiB, deduplicates by Ara's monotonically increasing `seq`, resumes from
 the last observed sequence after reconnect, and reports an explicit gap after an
 expired resume cursor, sequence discontinuity, or buffer eviction. Retained records
-contain bounded IDs, sequence state/progress, and failure summaries rather than raw
-event payloads or FITS/image bytes. An idle stream remains
+contain bounded IDs, sequence state/progress, failure summaries, and selected bounded
+event-family contexts; raw event JSON and FITS/image bytes are not retained. An idle stream remains
 healthy when the Ara heartbeat is fresh. Without owned control, ara-mcp makes no
 WebSocket connection; job/frame/sequence tools read current state over REST.
 `get_recent_ara_events` reports socket availability/freshness and retained gap/drop
 state; callers reconcile gaps with current Ara REST state rather than treating
-retained events as a durable journal.
+retained events as a durable journal. The bounded projection includes camera exposure
+lifecycle timing, guider step measurements/session markers, and autofocus probe/fit/run
+details where Ara supplies them; unsupported/raw payload fields and image bytes are
+discarded. The event contracts were additionally source-reviewed against
+[openastro-ara commit `29f72ea2246a1343a60724361d271912610b3503`](https://github.com/open-astro/openastro-ara/tree/29f72ea2246a1343a60724361d271912610b3503), specifically its
+[WebSocket event catalog](https://github.com/open-astro/openastro-ara/blob/29f72ea2246a1343a60724361d271912610b3503/OpenAstroAra.Server/Contracts/WsEvents/WsEventCatalog.cs)
+and event publishers. Decoder/retention tests are contract evidence, not a claim that
+each physical event source was exercised on hardware.
+
+The newer source-reviewed Ara surface at that commit also supplies the T15–T18
+integrations: autofocus state/frame/cancel/calibration at `/autofocus/*`, retained
+fault list/detail at `/faults`, guide-camera focus lease endpoints at
+`/equipment/guider/focus*`, and saved-frame solve/coordinate center at
+`/platesolve/*`. The centering route returns an asynchronous `center` job; the existing
+`/jobs/{id}` reader supplies its outcome. See the task-specific entries in
+[`plan.md`](plan.md#task-list) for adapter limits and verification.
 
 Ara also exposes guider, rotator, dome, switch, flat-device, calibration, mosaic,
 polar-alignment, diagnostics, and other operations. Select a useful tool surface

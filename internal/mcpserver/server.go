@@ -122,6 +122,10 @@ func New(options Options) (*mcp.Server, error) {
 		return result, err
 	})
 	registerProgressTools(server, instrumentation, options.Ara)
+	registerAutofocusTools(server, instrumentation, options.Ara, options.Control)
+	registerFaultTools(server, instrumentation, options.Ara)
+	registerGuideFocusTools(server, instrumentation, options.Ara, options.Control)
+	registerPlateSolveTools(server, instrumentation, options.Ara, options.Control)
 	addTool(server, instrumentation, &mcp.Tool{
 		Name:        "get_adapter_diagnostics",
 		Description: "Read local adapter health and resource diagnostics without changing Ara state.",
@@ -134,7 +138,7 @@ func New(options Options) (*mcp.Server, error) {
 	registerManualEquipmentTools(server, instrumentation, options.Ara, options.Control)
 	if options.Control != nil {
 		addTool(server, instrumentation, &mcp.Tool{
-			Name: "get_recent_ara_events", Description: "Read the bounded event history from this adapter-owned Ara control socket; outside control use the sequence, job, and frame REST readers.",
+			Name: "get_recent_ara_events", Description: "Read bounded events from this adapter-owned Ara socket, including exposure, guider, autofocus, sequence, equipment, and fault context where Ara supplies it. Outside control no new events arrive; reconcile gaps with state tools.",
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 		}, func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (EventSnapshot, error) {
 			return options.Control.RecentEvents(), nil

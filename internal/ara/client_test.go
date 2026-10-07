@@ -758,6 +758,254 @@ func TestMaintainControlWebSocketKeepsEquipmentFaultContext(t *testing.T) {
 	}
 }
 
+func TestMaintainControlWebSocketKeepsExposureContext(t *testing.T) {
+	const frame = `{"type":"camera.exposure_started","ts":"2026-10-06T16:00:00Z","seq":11,"payload":{"frame_id":"frame-01","exposure_sec":30,"started_utc":"2026-10-06T16:00:00Z","kind":"light","filter_name":"Ha"}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		if err := conn.Write(t.Context(), websocket.MessageText, []byte(frame)); err != nil {
+			t.Errorf("write event: %v", err)
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			cancel()
+		})
+	}()
+	event := <-events
+	if event.Type != "camera.exposure_started" || event.Exposure == nil || event.Exposure.FrameID != "frame-01" || event.Exposure.ExposureSec == nil || *event.Exposure.ExposureSec != 30 || event.Exposure.Kind != "light" || event.Exposure.FilterName != "Ha" || event.Exposure.StartedUTC != "2026-10-06T16:00:00Z" {
+		t.Fatalf("exposure event = %+v", event)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
+func TestMaintainControlWebSocketKeepsGuiderStepContext(t *testing.T) {
+	const frame = `{"type":"guider.step","ts":"2026-10-06T16:00:01Z","seq":12,"payload":{"frame":42,"time_sec":12.5,"ra_raw_px":0.75,"dec_raw_px":-0.25,"ra_arcsec":1.5,"dec_arcsec":-0.5,"ra_duration_ms":120,"dec_duration_ms":-40,"pixel_scale_arcsec":2,"star_mass":5000,"snr":18}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		if err := conn.Write(t.Context(), websocket.MessageText, []byte(frame)); err != nil {
+			t.Errorf("write event: %v", err)
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			cancel()
+		})
+	}()
+	event := <-events
+	if event.Type != "guider.step" || event.Guider == nil || event.Guider.Frame == nil || *event.Guider.Frame != 42 || event.Guider.RARawPX == nil || *event.Guider.RARawPX != 0.75 || event.Guider.DecDurationMS == nil || *event.Guider.DecDurationMS != -40 || event.Guider.SNR == nil || *event.Guider.SNR != 18 {
+		t.Fatalf("guider event = %+v", event)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
+func TestMaintainControlWebSocketKeepsAutofocusContext(t *testing.T) {
+	const frame = `{"type":"autofocus.step_complete","ts":"2026-10-06T16:00:02Z","seq":13,"payload":{"step_index":4,"phase":"fine","position":1200,"hfr":2.35,"stars":87,"kept":true,"total_steps":9}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		if err := conn.Write(t.Context(), websocket.MessageText, []byte(frame)); err != nil {
+			t.Errorf("write event: %v", err)
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			cancel()
+		})
+	}()
+	event := <-events
+	if event.Type != "autofocus.step_complete" || event.Autofocus == nil || event.Autofocus.StepIndex == nil || *event.Autofocus.StepIndex != 4 || event.Autofocus.Phase != "fine" || event.Autofocus.Position == nil || *event.Autofocus.Position != 1200 || event.Autofocus.HFR == nil || *event.Autofocus.HFR != 2.35 || event.Autofocus.Kept == nil || !*event.Autofocus.Kept {
+		t.Fatalf("autofocus event = %+v", event)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
+func TestMaintainControlWebSocketKeepsExposureGuiderAndAutofocusLifecycleDetails(t *testing.T) {
+	frames := []string{
+		`{"type":"camera.exposure_complete","ts":"2026-10-06T16:00:03Z","seq":14,"payload":{"frame_id":"frame-02","exposure_sec":30,"started_utc":"2026-10-06T16:00:00Z","kind":"light","elapsed_ms":30120}}`,
+		`{"type":"guider.event","ts":"2026-10-06T16:00:04Z","seq":15,"payload":{"kind":"star_lost","frame":43,"distance_px":2.5,"status":2,"error":"guide star lost"}}`,
+		`{"type":"autofocus.completed","ts":"2026-10-06T16:00:05Z","seq":16,"payload":{"mode":"classic","final_position":1200,"final_hfr":2.1,"duration_seconds":84.5,"probes":9}}`,
+		`{"type":"autofocus.collimation_verdict","ts":"2026-10-06T16:00:06Z","seq":17,"payload":{"severity":"warning","offset_percent":12.5,"direction_degrees":90,"stars_used":37}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		for _, frame := range frames {
+			if err := conn.Write(t.Context(), websocket.MessageText, []byte(frame)); err != nil {
+				t.Errorf("write event: %v", err)
+				return
+			}
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, len(frames))
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			if event.Seq == 17 {
+				cancel()
+			}
+		})
+	}()
+	exposure, guider, autofocus, collimation := <-events, <-events, <-events, <-events
+	if exposure.Exposure == nil || exposure.Exposure.ElapsedMS == nil || *exposure.Exposure.ElapsedMS != 30120 {
+		t.Fatalf("exposure completion = %+v", exposure)
+	}
+	if guider.Guider == nil || guider.Guider.Kind != "star_lost" || guider.Guider.Error != "guide star lost" || guider.Guider.DistancePX == nil || *guider.Guider.DistancePX != 2.5 {
+		t.Fatalf("guider session event = %+v", guider)
+	}
+	if autofocus.Autofocus == nil || autofocus.Autofocus.Mode != "classic" || autofocus.Autofocus.FinalPosition == nil || *autofocus.Autofocus.FinalPosition != 1200 || autofocus.Autofocus.FinalHFR == nil || *autofocus.Autofocus.FinalHFR != 2.1 || autofocus.Autofocus.Probes == nil || *autofocus.Autofocus.Probes != 9 {
+		t.Fatalf("autofocus completion = %+v", autofocus)
+	}
+	if collimation.Autofocus == nil || collimation.Autofocus.Severity != "warning" || collimation.Autofocus.StarsUsed == nil || *collimation.Autofocus.StarsUsed != 37 || collimation.Autofocus.DirectionDegrees == nil || *collimation.Autofocus.DirectionDegrees != 90 {
+		t.Fatalf("autofocus collimation verdict = %+v", collimation)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
+func TestMaintainControlWebSocketMarksMalformedAndOversizedKnownEventsAsGaps(t *testing.T) {
+	frames := []string{
+		`{"type":"guider.step","ts":"2026-10-06T16:00:03Z","seq":14,"payload":{"ra_raw_px":"not-a-number"}}`,
+		`{"type":"autofocus.step_complete","ts":"2026-10-06T16:00:04Z","seq":15,"payload":{"hfr":1000000001}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept WebSocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		for _, frame := range frames {
+			if err := conn.Write(t.Context(), websocket.MessageText, []byte(frame)); err != nil {
+				t.Errorf("write event: %v", err)
+				return
+			}
+		}
+		_, _, _ = conn.Read(t.Context())
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := client.OpenControlWebSocket(t.Context(), ControlSession{sessionID: "b15e5138-12f0-4c41-8a43-ed79ef527e12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := make(chan WebSocketEvent, len(frames))
+	done := make(chan error, 1)
+	go func() {
+		done <- client.MaintainControlWebSocketWithEvents(ctx, conn, nil, nil, func(event WebSocketEvent) {
+			events <- event
+			if event.Seq == 15 {
+				cancel()
+			}
+		})
+	}()
+	for sequence := int64(14); sequence <= 15; sequence++ {
+		select {
+		case event := <-events:
+			if event.Type != "ara.event_gap" || !event.Gap || event.Seq != sequence {
+				t.Fatalf("invalid event projection = %+v, want gap at sequence %d", event, sequence)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("invalid known event at sequence %d did not produce a gap", sequence)
+		}
+	}
+	if err := <-done; err == nil {
+		t.Fatal("maintain returned nil after cancellation")
+	}
+}
+
 func TestMaintainControlWebSocketMarksOversizedDeviceIdentityAsGap(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)

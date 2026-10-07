@@ -365,6 +365,38 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 	if captureResult.Mutation.Outcome != ara.OutcomeAccepted || captureResult.Frame.FrameID == "" {
 		t.Fatalf("capture_exposure result = %#v; want accepted simulator frame", captureResult)
 	}
+	eventCtx, cancelEvents := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancelEvents()
+	var latestSnapshot EventSnapshot
+	var latestEventCallErr error
+	var latestEventCallIsError bool
+	for {
+		result, err := clientSession.CallTool(eventCtx, &mcp.CallToolParams{Name: "get_recent_ara_events"})
+		latestEventCallErr, latestEventCallIsError = err, err == nil && result.IsError
+		observed := false
+		if err == nil && !result.IsError {
+			var events EventSnapshot
+			decodeLiveContent(t, result.StructuredContent, &events)
+			latestSnapshot = events
+			for _, event := range events.Events {
+				if event.Type == "camera.exposure_complete" && event.FrameID == captureResult.Frame.FrameID {
+					if event.Exposure == nil || event.Exposure.ExposureSec == nil || *event.Exposure.ExposureSec != 0.1 || event.Exposure.ElapsedMS == nil {
+						t.Fatalf("Ara exposure completion event = %+v; want bounded exposure timing context", event)
+					}
+					observed = true
+					break
+				}
+			}
+		}
+		if observed {
+			break
+		}
+		select {
+		case <-eventCtx.Done():
+			t.Fatalf("Ara exposure completion event for frame %s was not retained; snapshot available=%t stale=%t gap=%t last_sequence=%d events=%d, control=%+v, tool_error=%v tool_is_error=%t", captureResult.Frame.FrameID, latestSnapshot.Available, latestSnapshot.Stale, latestSnapshot.Gap, latestSnapshot.LastSequence, len(latestSnapshot.Events), control.Snapshot(), latestEventCallErr, latestEventCallIsError)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	previewCtx, cancelPreview := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancelPreview()
 	for {

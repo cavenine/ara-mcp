@@ -337,6 +337,52 @@ const dashboardScript = `
     if(event.failed_instruction_index!==undefined)details.push("failed item "+event.failed_instruction_index+(event.failed_instruction_name?" · "+event.failed_instruction_name:""));
     else if(event.failed_instruction_name)details.push("failed item "+event.failed_instruction_name);
     if(event.failure_reason)details.push(event.failure_reason);
+    if(event.exposure){
+      const exposure=event.exposure;
+      if(exposure.exposure_sec!==undefined)details.push("exposure "+exposure.exposure_sec+" s");
+      if(exposure.filter_name)details.push("filter "+exposure.filter_name);
+      if(exposure.elapsed_ms!==undefined)details.push("elapsed "+exposure.elapsed_ms+" ms");
+      if(exposure.reason)details.push(exposure.reason);
+    }
+    if(event.guider){
+      const guider=event.guider;
+      if(guider.frame!==undefined)details.push("guide frame "+guider.frame);
+      if(guider.ra_arcsec!==undefined||guider.dec_arcsec!==undefined)details.push("guide error "+(guider.ra_arcsec??"—")+" / "+(guider.dec_arcsec??"—")+" arcsec");
+      else if(guider.ra_raw_px!==undefined||guider.dec_raw_px!==undefined)details.push("guide offset "+(guider.ra_raw_px??"—")+" / "+(guider.dec_raw_px??"—")+" px");
+      if(guider.ra_duration_ms!==undefined||guider.dec_duration_ms!==undefined)details.push("pulse "+(guider.ra_duration_ms??"—")+" / "+(guider.dec_duration_ms??"—")+" ms");
+      if(guider.snr!==undefined)details.push("SNR "+guider.snr);
+      if(guider.star_mass!==undefined)details.push("star mass "+guider.star_mass);
+      if(guider.pixel_scale_arcsec!==undefined)details.push("scale "+guider.pixel_scale_arcsec+" arcsec/px");
+      if(guider.dx_px!==undefined||guider.dy_px!==undefined)details.push("marker Δ "+(guider.dx_px??"—")+" / "+(guider.dy_px??"—")+" px");
+      if(guider.distance_px!==undefined)details.push("distance "+guider.distance_px+" px");
+      if(guider.settle_time_sec!==undefined)details.push("settle "+guider.settle_time_sec+" s");
+      if(guider.error)details.push(guider.error);
+    }
+    if(event.autofocus){
+      const autofocus=event.autofocus;
+      if(autofocus.mode||autofocus.phase)details.push("focus "+[autofocus.mode,autofocus.phase].filter(Boolean).join(" / "));
+      if(autofocus.step_index!==undefined)details.push("probe "+autofocus.step_index+" / "+(autofocus.total_steps??"?"));
+      if(autofocus.shot_index!==undefined)details.push("shot "+autofocus.shot_index);
+      if(autofocus.position!==undefined)details.push("position "+autofocus.position);
+      if(autofocus.hfr!==undefined)details.push("HFR "+autofocus.hfr);
+      if(autofocus.stars!==undefined)details.push("stars "+autofocus.stars);
+      if(autofocus.total_steps!==undefined&&autofocus.step_index===undefined)details.push("steps "+autofocus.total_steps);
+      if(autofocus.stars_used!==undefined)details.push("stars "+autofocus.stars_used);
+      if(autofocus.final_position!==undefined)details.push("final position "+autofocus.final_position);
+      if(autofocus.final_hfr!==undefined)details.push("final HFR "+autofocus.final_hfr);
+      if(autofocus.final_stars!==undefined)details.push("final stars "+autofocus.final_stars);
+      if(autofocus.duration_seconds!==undefined)details.push("duration "+autofocus.duration_seconds+" s");
+      if(autofocus.kept===false)details.push("probe dropped");
+      if(autofocus.reason)details.push(autofocus.reason);
+      if(autofocus.algorithm)details.push("fit "+autofocus.algorithm+" · R² "+(autofocus.r_squared??"—"));
+      if(autofocus.best_position!==undefined)details.push("best position "+autofocus.best_position);
+      if(autofocus.predicted_hfr!==undefined)details.push("predicted HFR "+autofocus.predicted_hfr);
+      if(autofocus.usable===false)details.push("fit unusable");
+      if(autofocus.within_range===false)details.push("best fit outside sampled range");
+      if(autofocus.severity)details.push("collimation "+autofocus.severity);
+      if(autofocus.offset_percent!==undefined)details.push("offset "+autofocus.offset_percent+"%");
+      if(autofocus.direction_degrees!==undefined)details.push("direction "+autofocus.direction_degrees+"°");
+    }
     return details.join(" · ")||"—";
   }
   function eventCell(row,value,className){

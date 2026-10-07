@@ -14,8 +14,14 @@ and dated headings. No release has been published.
 - Add a newest-first dashboard table for the latest 50 Ara WebSocket events from the
   adapter's existing owned-session buffer. Rows include event time/type, device
   type/ID/name, state, removal, and bounded fault/action/progress context where present.
-  It updates with the dashboard stream, reports stale/gapped sessions, and never opens a
-  second Ara WebSocket.
+  Preserve and render Ara exposure lifecycle timing, guider step/session telemetry, and
+  autofocus probe/fit/result details without retaining raw payloads or image bytes. The
+  dashboard stream reports stale/gapped sessions and never opens a second Ara WebSocket.
+- Add autofocus run/state/frame/calibration tools, controlled cancellation and
+  recalibration; bounded retained Ara fault-history readers; guide-camera focus
+  lifecycle/status/frame tools through Ara's existing lease; and saved-frame solve plus
+  controlled coordinate-centering/job tools. Async acceptance remains distinct from
+  observed completion; live evidence is limited to the simulator exposure event path.
 - End-user install and connection guide with local stdio and beside-Ara Streamable
   HTTP MCP examples, deployment diagrams, and a concise tool reference. Document the
   `v0.1.0` first-version plan and provide a source-build and cross-platform archive/

@@ -56,6 +56,29 @@ func TestControlManagerRetainsBoundedDeduplicatedAraEvents(t *testing.T) {
 	}
 }
 
+func TestAraEventCategoryGroupsGuiderTelemetryWithEquipment(t *testing.T) {
+	if got := eventCategory("guider.step"); got != "equipment" {
+		t.Fatalf("guider event category = %q, want equipment", got)
+	}
+}
+
+func TestControlManagerSnapshotsOwnTelemetryContext(t *testing.T) {
+	manager, err := NewControlManager(nil, nil, "test", "stdio", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.stop)
+	measurement := 0.75
+	want := measurement
+	manager.recordEvent(ara.WebSocketEvent{Type: "guider.step", Seq: 1, Guider: &ara.GuiderEventContext{RARawPX: &measurement}})
+	first := manager.RecentEvents()
+	*first.Events[0].Guider.RARawPX = 99
+	second := manager.RecentEvents()
+	if got := *second.Events[0].Guider.RARawPX; got != want {
+		t.Fatalf("retained guider measurement = %v, want %v", got, want)
+	}
+}
+
 func TestReadControlIdentityUsesActiveProfileListWhenServerStateOmitsID(t *testing.T) {
 	const profileID = "e1d64755-e2ae-46f1-aa43-c6e67419e1e9"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

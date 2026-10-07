@@ -308,6 +308,12 @@ func TestHandlerServesPinnedDatastarRuntimeLocally(t *testing.T) {
 		`aria-label="Memory usage over time"`,
 		`aria-label="Ara server events"`,
 		`id="ara-event-rows"`,
+		`if(event.exposure){`,
+		`guide error `,
+		`if(event.autofocus){`,
+		`final HFR `,
+		`marker Δ `,
+		`collimation `,
 		`Newest first`,
 		`prefers-reduced-motion:reduce`,
 	} {
@@ -326,10 +332,16 @@ func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
 	}
 	sampler := monitor.NewSampler()
 	sample := sampler.Snapshot()
+	thirtySeconds, elapsedMS, guideFrame, raArcsec, focusStep, focusHFR := 30.0, int64(30120), 42, 1.5, 4, 2.35
 	handler, err := Handler(Access{Listen: "127.0.0.1:0"}, Runtime{
 		Ara: client, Sampler: sampler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), StartedAt: time.Now(),
 		RecentAraEvents: func() AraEventSnapshot {
-			return AraEventSnapshot{Available: true, Events: []ara.WebSocketEvent{{Type: "equipment.connected", Timestamp: "2026-10-06T16:00:00Z", Seq: 7, DeviceType: "camera", DeviceID: "camera-1", DeviceName: "ASI2600", State: "connected"}}}
+			return AraEventSnapshot{Available: true, LastSequence: 10, Events: []ara.WebSocketEvent{
+				{Type: "equipment.connected", Timestamp: "2026-10-06T16:00:00Z", Seq: 7, DeviceType: "camera", DeviceID: "camera-1", DeviceName: "ASI2600", State: "connected"},
+				{Type: "camera.exposure_complete", Seq: 8, Exposure: &ara.ExposureEventContext{FrameID: "frame-1", ExposureSec: &thirtySeconds, ElapsedMS: &elapsedMS}},
+				{Type: "guider.step", Seq: 9, Guider: &ara.GuiderEventContext{Frame: &guideFrame, RAArcsec: &raArcsec}},
+				{Type: "autofocus.step_complete", Seq: 10, Autofocus: &ara.AutofocusEventContext{StepIndex: &focusStep, HFR: &focusHFR}},
+			}}
 		},
 	})
 	if err != nil {
@@ -357,7 +369,7 @@ func TestResourceStreamSendsCurrentSampleAndFlushes(t *testing.T) {
 		}
 		event.WriteString(line)
 	}
-	if !strings.Contains(event.String(), "event: datastar-merge-fragments\n") || !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "data: selector #dashboard\n") || !strings.Contains(event.String(), "data: fragments <main id=\"dashboard\" class=\"page-shell\">") || !strings.Contains(event.String(), sample.InstanceID) || !strings.Contains(event.String(), "equipment.connected") || !strings.Contains(event.String(), "ASI2600") || !strings.Contains(event.String(), "camera-1") || !strings.Contains(event.String(), "2026-10-06T16:00:00Z") {
+	if !strings.Contains(event.String(), "event: datastar-merge-fragments\n") || !strings.Contains(event.String(), "id: "+sample.InstanceID+":"+strconv.FormatUint(sample.SampleSequence, 10)+"\n") || !strings.Contains(event.String(), "data: selector #dashboard\n") || !strings.Contains(event.String(), "data: fragments <main id=\"dashboard\" class=\"page-shell\">") || !strings.Contains(event.String(), sample.InstanceID) || !strings.Contains(event.String(), "equipment.connected") || !strings.Contains(event.String(), "ASI2600") || !strings.Contains(event.String(), "camera-1") || !strings.Contains(event.String(), "2026-10-06T16:00:00Z") || !strings.Contains(event.String(), "camera.exposure_complete") || !strings.Contains(event.String(), "exposure_sec") || !strings.Contains(event.String(), "ra_arcsec") || !strings.Contains(event.String(), "autofocus.step_complete") || !strings.Contains(event.String(), "step_index") {
 		t.Fatalf("Datastar patch event = %q", event.String())
 	}
 }

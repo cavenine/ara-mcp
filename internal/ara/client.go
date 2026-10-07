@@ -44,15 +44,17 @@ type Client struct{ gateway *httpGateway }
 // request describes an Ara route. Route is a template such as
 // "/sequences/{id}"; PathParams supplies values for its placeholders.
 type request struct {
-	Method           string
-	Route            string
-	PathParams       map[string]string
-	Query            map[string][]string
-	Body             []byte
-	IdempotencyKey   string
-	RequestID        string
-	RawResponse      bool
-	MaxResponseBytes int
+	Method              string
+	Route               string
+	PathParams          map[string]string
+	Query               map[string][]string
+	Body                []byte
+	IdempotencyKey      string
+	RequestID           string
+	RawResponse         bool
+	MaxResponseBytes    int
+	ResponseHeader      string
+	ResponseHeaderValue *string
 }
 
 // Page is Ara's cursor-page wire envelope. Cursors remain opaque to the client.
