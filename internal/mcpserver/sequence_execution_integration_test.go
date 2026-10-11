@@ -56,8 +56,12 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 	if err := json.Unmarshal(cameraBody, &camera); err != nil {
 		t.Fatal(err)
 	}
-	if camera.DeviceID != "fe4996a4-2165-4602-9255-8b9362c5f498" || camera.State != "connected" {
-		t.Skip("the selected profile does not point to the pinned OmniSim camera")
+	expectedCameraID := os.Getenv("ARA_MCP_LIVE_SIM_CAMERA_ID")
+	if expectedCameraID == "" {
+		expectedCameraID = "fe4996a4-2165-4602-9255-8b9362c5f498"
+	}
+	if camera.DeviceID != expectedCameraID || camera.State != "connected" {
+		t.Skipf("selected profile camera %q is not the expected connected OmniSim camera %q", camera.DeviceID, expectedCameraID)
 	}
 	storageBody, _, err := client.GetProfileStorageWithRequestID(t.Context(), "live-t06-storage")
 	if err != nil {
@@ -69,8 +73,12 @@ func TestLiveAraSequenceStartAndStateWithPinnedOmniSim(t *testing.T) {
 	if err := json.Unmarshal(storageBody, &storage); err != nil {
 		t.Fatal(err)
 	}
-	if storage.SaveDirectory != "/tmp/ara-mcp-t06-captures" {
-		t.Skip("the selected test profile does not use the disposable capture directory")
+	expectedCaptureDir := os.Getenv("ARA_MCP_LIVE_CAPTURE_DIR")
+	if expectedCaptureDir == "" {
+		expectedCaptureDir = "/tmp/ara-mcp-t06-captures"
+	}
+	if storage.SaveDirectory != expectedCaptureDir {
+		t.Skipf("test profile capture directory %q does not match expected disposable directory %q", storage.SaveDirectory, expectedCaptureDir)
 	}
 	sessionInfo, _, err := client.GetServerSessionWithRequestID(t.Context(), "live-t06-owner")
 	if err != nil {

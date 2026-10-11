@@ -538,6 +538,10 @@ control session, and a connected pinned simulator camera. They skip rather than 
 over another profile/session. A valid run is simulator evidence, not physical-rig or
 arbitrary-MCP-host compatibility evidence.
 
+For a persistent OmniSim installation with a different camera UUID or a dedicated
+capture volume, set `ARA_MCP_LIVE_SIM_CAMERA_ID` and `ARA_MCP_LIVE_CAPTURE_DIR` to the
+connected simulator's ID and the disposable profile directory before running the test.
+
 ## Agent-assisted development
 
 Start with [agent-instructions.md](agent-instructions.md) to select rules and skills.
